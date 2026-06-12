@@ -208,6 +208,120 @@ async def get_last_subscription(pool: asyncpg.Pool, tg_id: int) -> asyncpg.Recor
     )
 
 
+async def set_user_email(pool: asyncpg.Pool, tg_id: int, email: str) -> None:
+    """Сохраняет реальный email покупателя (для чека 54-ФЗ). Задел под будущий сбор."""
+    await pool.execute(
+        "UPDATE users SET email = $2, updated_at = now() WHERE tg_id = $1",
+        tg_id,
+        email,
+    )
+
+
+# ── Платежи (payments) ───────────────────────────────────────────────────────
+async def create_payment(
+    pool: asyncpg.Pool,
+    *,
+    yookassa_payment_id: str,
+    idempotence_key: str,
+    tg_id: int,
+    tier_id: int | None,
+    months: int,
+    fixed_price: Decimal | int | float,
+    amount: Decimal | int | float,
+    confirmation_url: str | None,
+    status: str = "pending",
+) -> int:
+    row = await pool.fetchrow(
+        """
+        INSERT INTO payments(
+            yookassa_payment_id, idempotence_key, tg_id, tier_id, months,
+            fixed_price, amount, confirmation_url, status
+        )
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id
+        """,
+        yookassa_payment_id,
+        idempotence_key,
+        tg_id,
+        tier_id,
+        months,
+        Decimal(str(fixed_price)),
+        Decimal(str(amount)),
+        confirmation_url,
+        status,
+    )
+    return row["id"]
+
+
+async def get_payment_by_yk_id(pool: asyncpg.Pool, yk_id: str) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        "SELECT * FROM payments WHERE yookassa_payment_id = $1", yk_id
+    )
+
+
+async def get_pending_payments(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Незавершённые платежи — их опрашивает фоновый поллер."""
+    return await pool.fetch(
+        "SELECT * FROM payments WHERE status = 'pending' ORDER BY id"
+    )
+
+
+async def mark_payment_canceled(pool: asyncpg.Pool, yk_id: str) -> None:
+    await pool.execute(
+        "UPDATE payments SET status = 'canceled', updated_at = now() "
+        "WHERE yookassa_payment_id = $1 AND status = 'pending'",
+        yk_id,
+    )
+
+
+async def activate_payment(
+    pool: asyncpg.Pool, yk_id: str, end_date: datetime
+) -> tuple[int | None, bool]:
+    """Атомарно активирует подписку по успешному платежу. Идемпотентно.
+
+    Берёт строку платежа под блокировку (FOR UPDATE). Если подписка уже создана
+    (subscription_id заполнен) — ничего не делает: повторный вызов (поллер + кнопка
+    «Проверить» одновременно, повторная оплата того же платежа) НЕ создаёт дубль.
+    Иначе создаёт подписку, помечает платёж succeeded и связывает их.
+
+    Возвращает (subscription_id, created):
+      created=True  — подписка создана этим вызовом (уведомить пользователя);
+      created=False — платёж не найден (id=None) либо уже был активирован ранее.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            pay = await conn.fetchrow(
+                "SELECT * FROM payments WHERE yookassa_payment_id = $1 FOR UPDATE",
+                yk_id,
+            )
+            if pay is None:
+                return None, False
+            if pay["subscription_id"] is not None:
+                return pay["subscription_id"], False  # уже активирован — без дубля
+
+            sub = await conn.fetchrow(
+                """
+                INSERT INTO subscriptions(
+                    tg_id, tier_id, fixed_price, months, end_date, source, status
+                )
+                VALUES($1, $2, $3, $4, $5, 'payment', 'active')
+                RETURNING id
+                """,
+                pay["tg_id"],
+                pay["tier_id"],
+                pay["fixed_price"],
+                pay["months"],
+                end_date,
+            )
+            await conn.execute(
+                "UPDATE payments SET status = 'succeeded', subscription_id = $2, "
+                "updated_at = now() WHERE id = $1",
+                pay["id"],
+                sub["id"],
+            )
+            return sub["id"], True
+
+
 async def cancel_active_subscriptions(pool: asyncpg.Pool, tg_id: int) -> int:
     """Аннулирует все активные подписки участника (status → cancelled).
 

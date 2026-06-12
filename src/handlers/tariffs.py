@@ -77,8 +77,7 @@ async def show_summary(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:summary:{months}m")
 
     b = InlineKeyboardBuilder()
-    # Заглушка оплаты — заменяется реальной кнопкой ЮKassa на этапе 3.
-    b.row(InlineKeyboardButton(text="Перейти к оплате", callback_data="pay:soon"))
+    b.row(InlineKeyboardButton(text="Перейти к оплате", callback_data=f"pay:create:{duration['id']}"))
     b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_TARIFF))
     await _edit(
         cb,
@@ -89,8 +88,3 @@ async def show_summary(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
         f"🤖 Бот → @{cb.from_user.username or '—'}: сводка {months} мес × "
         f"{fmt_price(monthly)} ₽ = {fmt_price(total)} ₽"
     )
-
-
-@router.callback_query(F.data == "pay:soon")
-async def pay_soon(cb: CallbackQuery) -> None:
-    await cb.answer("Оплата подключается на следующем этапе.", show_alert=True)

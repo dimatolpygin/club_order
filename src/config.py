@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # ── ЮKassa (этап 3) ──────────────────────────────────────────────────────
     yookassa_shop_id: str = ""
     yookassa_secret_key: str = ""
+    # Куда ЮKassa вернёт пользователя после оплаты. Если пусто — соберётся
+    # автоматически как ссылка на бота (https://t.me/<username>).
+    yookassa_return_url: str = ""
     # Как часто опрашивать pending-платежи (минуты).
     payment_poll_interval_min: int = 1
     # Чек 54-ФЗ: ВРЕМЕННАЯ заглушка email покупателя.
