@@ -1,11 +1,13 @@
-"""Хендлер /start. Этап 0 — заглушка: фиксируем пользователя и отвечаем приветствием."""
+"""Хендлеры /start и /menu. Точка входа в навигацию бота."""
 from __future__ import annotations
 
 from aiogram import Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 import asyncpg
 
+from .. import keyboards as kb
 from .. import repo, texts
 from ..logger import logger
 
@@ -13,8 +15,20 @@ router = Router()
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
+async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
     u = message.from_user
     await repo.upsert_user(pool, u.id, u.username, u.first_name)
-    await message.answer(texts.START_STUB)
-    logger.info(f"🤖 Бот → @{u.username or '—'}: приветствие (заглушка этапа 0)")
+    await repo.set_fsm_state(pool, u.id, "screen:start")
+    await message.answer(texts.WELCOME, reply_markup=kb.welcome_kb())
+    logger.info(f"🤖 Бот → @{u.username or '—'}: приветствие /start")
+
+
+@router.message(Command("menu"))
+async def cmd_menu(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()
+    u = message.from_user
+    await repo.upsert_user(pool, u.id, u.username, u.first_name)
+    await repo.set_fsm_state(pool, u.id, "screen:menu")
+    await message.answer(texts.MAIN_MENU, reply_markup=kb.main_menu_kb())
+    logger.info(f"🤖 Бот → @{u.username or '—'}: главное меню /menu")
