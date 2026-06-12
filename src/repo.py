@@ -76,6 +76,21 @@ async def update_tier(pool: asyncpg.Pool, tier_id: int, **fields) -> bool:
     return row is not None
 
 
+async def count_active_members(pool: asyncpg.Pool) -> int:
+    """Сколько мест в клубе занято = число участников с активной подпиской.
+
+    По этому числу движок определяет текущую ценовую ступень.
+    """
+    row = await pool.fetchrow(
+        """
+        SELECT COUNT(DISTINCT tg_id) AS n
+        FROM subscriptions
+        WHERE status = 'active' AND end_date > now()
+        """
+    )
+    return row["n"] or 0
+
+
 async def tier_occupancy(pool: asyncpg.Pool) -> dict[int, int]:
     """Сколько мест занято по каждой ступени = число активных подписок этой ступени."""
     rows = await pool.fetch(

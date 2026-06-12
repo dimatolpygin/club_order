@@ -116,11 +116,22 @@ SOON = (
     "Сейчас идёт настройка тарифов и оплаты. Загляни чуть позже."
 )
 
-# 4. Выбор тарифа
-TARIFF_CHOOSE = (
-    "<b>ВЫБЕРИ СВОЙ ВХОД В КЛУБ</b>\n\n"
-    "Доступные тарифы сейчас. Выбери цену входа:"
-)
+def _months_word(months: int) -> str:
+    if months % 10 == 1 and months % 100 != 11:
+        return "месяц"
+    if 2 <= months % 10 <= 4 and not 12 <= months % 100 <= 14:
+        return "месяца"
+    return "месяцев"
+
+
+# 4. Выбор подписки (пользователь видит только длительности; ставка — автоматическая)
+def tariff_choose(monthly_price: str) -> str:
+    return (
+        "<b>ВЫБЕРИ СВОЙ ВХОД В КЛУБ</b>\n\n"
+        f"Стоимость участия сейчас — <b>{monthly_price} ₽ / месяц</b>.\n\n"
+        "Выбери срок подписки:"
+    )
+
 
 TARIFF_NONE = (
     "<b>Мест сейчас нет</b>\n\n"
@@ -128,23 +139,13 @@ TARIFF_NONE = (
     "подскажем, когда откроются новые."
 )
 
-# Заголовок выбора длительности (после выбора ступени).
-def tariff_duration_title(tier_name: str, monthly_price: str) -> str:
-    return (
-        f"<b>{tier_name}</b>\n"
-        f"Цена: {monthly_price} ₽ / месяц\n\n"
-        "На какой срок оформляешь подписку?"
-    )
 
-
-# Итоговая сводка перед оплатой.
-def tariff_summary(tier_name: str, monthly_price: str, months: int, total: str) -> str:
-    suffix = "месяц" if months == 1 else ("месяца" if 2 <= months <= 4 else "месяцев")
+# Итоговая сводка перед оплатой (без упоминания ступеней — это внутренняя механика).
+def tariff_summary(monthly_price: str, months: int, total: str) -> str:
     return (
         "<b>ОФОРМЛЕНИЕ ПОДПИСКИ</b>\n\n"
-        f"Тариф: {tier_name}\n"
-        f"Цена: {monthly_price} ₽ / месяц\n"
-        f"Срок: {months} {suffix}\n\n"
+        f"Срок: {months} {_months_word(months)}\n"
+        f"Цена: {monthly_price} ₽ / месяц\n\n"
         f"<b>Итого к оплате: {total} ₽</b>\n\n"
         "После оплаты доступ в закрытый клуб откроется автоматически."
     )

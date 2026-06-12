@@ -54,33 +54,41 @@ async def invalidate(redis: Redis) -> None:
     await redis.delete(_TIERS_KEY, _DURATIONS_KEY)
 
 
-async def get_available_tiers(pool: asyncpg.Pool, redis: Redis) -> list[dict]:
-    """Активные ступени, у которых ещё есть свободные места.
+async def get_current_tier(pool: asyncpg.Pool, redis: Redis) -> dict | None:
+    """Текущая ценовая ступень — определяется числом уже занятых мест в клубе.
 
-    Каждый элемент: id, name, monthly_price(Decimal), seat_limit, occupied, seats_left.
-    Ступень со seat_limit=NULL — безлимит. Исчерпанные места — отфильтрованы.
+    Ступени-брекеты идут по порядку с кумулятивными лимитами:
+    места 1..L1 → ступень 1, L1+1..L1+L2 → ступень 2, и т.д.
+    Ступень с seat_limit=NULL («Стандарт») ловит всех сверх лимитов.
+    Возвращает {id, name, monthly_price(Decimal), tier_index} или None,
+    если все лимитные ступени заполнены и безлимитной нет.
+    Ступени пользователю НЕ показываются — это внутренний механизм цены.
     """
     tiers = await _cached_active_tiers(pool, redis)
-    occupancy = await repo.tier_occupancy(pool)
+    if not tiers:
+        return None
+    taken = await repo.count_active_members(pool)
 
-    available: list[dict] = []
-    for t in tiers:
-        occupied = occupancy.get(t["id"], 0)
+    cumulative = 0
+    for idx, t in enumerate(tiers, start=1):
         limit = t["seat_limit"]
-        if limit is not None and occupied >= limit:
-            continue  # места по этой ступени закончились — скрываем
-        available.append(
-            {
-                "id": t["id"],
-                "name": t["name"],
-                "monthly_price": Decimal(t["monthly_price"]),
-                "seat_limit": limit,
-                "occupied": occupied,
-                "seats_left": None if limit is None else (limit - occupied),
-            }
-        )
-    return available
+        if limit is None:
+            # Безлимитная ступень — текущая для всех, кто за пределами брекетов.
+            return _to_tier(t, idx)
+        cumulative += limit
+        if taken < cumulative:
+            return _to_tier(t, idx)
+    return None  # все лимитные ступени заполнены, безлимитной нет
 
 
-async def get_available_durations(pool: asyncpg.Pool, redis: Redis) -> list[dict]:
+def _to_tier(t: dict, idx: int) -> dict:
+    return {
+        "id": t["id"],
+        "name": t["name"],
+        "monthly_price": Decimal(t["monthly_price"]),
+        "tier_index": idx,
+    }
+
+
+async def get_active_durations(pool: asyncpg.Pool, redis: Redis) -> list[dict]:
     return await _cached_active_durations(pool, redis)
