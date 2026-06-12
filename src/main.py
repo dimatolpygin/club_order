@@ -63,11 +63,14 @@ async def main() -> None:
         ])
         me = await bot.get_me()
         scheduler.start()
+        # Явно запрашиваем нужные типы апдейтов. Без chat_join_request заявки в группу
+        # не доходят до бота (этап 4) — поэтому резолвим по зарегистрированным хендлерам.
+        allowed = dp.resolve_used_update_types()
         log.info(
             f"✅ Бот @{me.username} запущен (polling); поллер платежей каждые "
-            f"{settings.payment_poll_interval_min} мин"
+            f"{settings.payment_poll_interval_min} мин; апдейты: {allowed}"
         )
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, allowed_updates=allowed)
     finally:
         log.info("Останавливаю бота...")
         scheduler.shutdown(wait=False)

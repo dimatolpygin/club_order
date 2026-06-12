@@ -58,6 +58,14 @@ class Settings(BaseSettings):
         return [int(x) for x in self.admin_ids.replace(" ", "").split(",") if x]
 
     @property
+    def club_chat_id_int(self) -> int | None:
+        """Числовой id группы клуба (для сравнения с chat_join_request). None — не задан."""
+        raw = self.club_chat_id.strip()
+        if not raw or not raw.lstrip("-").isdigit():
+            return None
+        return int(raw)
+
+    @property
     def sqlalchemy_url(self) -> str:
         """URL для SQLAlchemy/Alembic — тот же Postgres, но через драйвер asyncpg."""
         url = self.database_url
