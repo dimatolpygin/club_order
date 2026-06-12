@@ -116,13 +116,17 @@ async def pay_check(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
 
 
 # ── Моя подписка ─────────────────────────────────────────────────────────────
-@router.callback_query(F.data == kb.NAV_MYSUB)
-async def my_subscription(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def render_my_subscription(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Экран «Моя подписка» — активная карточка либо «нет активной».
+
+    Вызывается из меню (NAV_MYSUB) и из «Вступить в клуб» для тех, кто уже оплатил
+    (чтобы не показывать им повторно выбор тарифа).
+    """
     await repo.set_fsm_state(pool, cb.from_user.id, "screen:mysub")
     sub = await repo.get_active_subscription(pool, cb.from_user.id)
     if sub is None:
         b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="Оформить подписку", callback_data=kb.NAV_JOIN))
+        b.row(InlineKeyboardButton(text="Оформить подписку", callback_data=kb.NAV_TARIFF))
         b.row(InlineKeyboardButton(text="Ввести промокод", callback_data=kb.NAV_PROMO))
         b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
         await _edit(cb, texts.MY_SUB_NONE, b.as_markup())
@@ -131,6 +135,7 @@ async def my_subscription(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     days_left = (sub["end_date"] - datetime.now(timezone.utc)).days
     b = InlineKeyboardBuilder()
+    payments.add_chat_button(b)
     b.row(InlineKeyboardButton(text="Продлить подписку", callback_data=kb.NAV_RENEW))
     b.row(InlineKeyboardButton(text="Правила клуба", callback_data=kb.NAV_RULES))
     b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
@@ -141,6 +146,7 @@ async def my_subscription(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
             sub["start_date"],
             sub["end_date"],
             texts.days_left_phrase(days_left),
+            cb.from_user.id,
         ),
         b.as_markup(),
     )
@@ -148,3 +154,8 @@ async def my_subscription(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"🤖 Бот → @{cb.from_user.username or '—'}: моя подписка активна "
         f"(осталось {days_left} дн.)"
     )
+
+
+@router.callback_query(F.data == kb.NAV_MYSUB)
+async def my_subscription(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    await render_my_subscription(cb, pool)

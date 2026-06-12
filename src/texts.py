@@ -214,10 +214,13 @@ def pay_success(monthly_price: str, start_date, end_date) -> str:
 
 
 # 11. Моя подписка — активна.
-def my_sub_active(monthly_price: str, start_date, end_date, days_left: str) -> str:
+def my_sub_active(
+    monthly_price: str, start_date, end_date, days_left: str, user_id: int
+) -> str:
     return (
         "<b>ТВОЯ ПОДПИСКА</b>\n\n"
         "Статус: <b>активна</b>\n"
+        f"User ID: <code>{user_id}</code>\n"
         f"Дата начала: {start_date:%d.%m.%Y}\n"
         f"Дата окончания: {end_date:%d.%m.%Y}\n"
         f"Твоя цена: {monthly_price} ₽ / месяц\n"

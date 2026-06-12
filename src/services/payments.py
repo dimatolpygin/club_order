@@ -21,6 +21,7 @@ from redis.asyncio import Redis
 
 from .. import keyboards as kb
 from .. import repo, texts
+from ..config import settings
 from ..logger import logger
 from ..utils import add_months, fmt_price
 from . import tariffs
@@ -135,8 +136,21 @@ async def sync_payment(
     return "pending", None
 
 
+def add_chat_button(b: InlineKeyboardBuilder) -> None:
+    """Кнопка перехода в закрытый чат (если инвайт-ссылка задана в настройках).
+
+    Авто-одобрение заявки только у оплативших добавится на этапе 4 — пока ссылка
+    просто ведёт в группу (заявка может ждать одобрения).
+    """
+    if settings.club_chat_invite_url:
+        b.row(InlineKeyboardButton(
+            text="Перейти в закрытый чат", url=settings.club_chat_invite_url
+        ))
+
+
 def success_kb() -> InlineKeyboardBuilder:
     b = InlineKeyboardBuilder()
+    add_chat_button(b)
     b.row(InlineKeyboardButton(text="Моя подписка", callback_data=kb.NAV_MYSUB))
     b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
     return b

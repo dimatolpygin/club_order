@@ -34,6 +34,13 @@ async def _edit(cb: CallbackQuery, text: str, markup) -> None:
 # ── Экран выбора длительности (цена — текущая ставка) ────────────────────────
 @router.callback_query(F.data.in_({kb.NAV_JOIN, kb.NAV_TARIFF}))
 async def show_tariffs(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> None:
+    # Уже оплатившим не показываем выбор тарифа — ведём в «Мою подписку».
+    if await repo.get_active_subscription(pool, cb.from_user.id) is not None:
+        from .payment import render_my_subscription
+
+        await render_my_subscription(cb, pool)
+        return
+
     await repo.set_fsm_state(pool, cb.from_user.id, "screen:tariffs")
     tier = await tariffs.get_current_tier(pool, redis)
     if tier is None:
