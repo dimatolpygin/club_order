@@ -19,3 +19,5 @@ class AdminStates(StatesGroup):
     dur_add = State()
     member_id = State()
     member_months = State()
+    user_lookup = State()    # поиск участника по tg_id
+    broadcast_text = State()  # текст рассылки (подтверждение — кнопкой)

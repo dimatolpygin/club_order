@@ -26,6 +26,26 @@ async def upsert_user(
     )
 
 
+async def get_user(pool: asyncpg.Pool, tg_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow("SELECT * FROM users WHERE tg_id = $1", tg_id)
+
+
+async def get_all_user_ids(pool: asyncpg.Pool) -> list[int]:
+    """Все tg_id для рассылки (кроме заблокированных)."""
+    rows = await pool.fetch(
+        "SELECT tg_id FROM users WHERE is_blocked = false ORDER BY tg_id"
+    )
+    return [r["tg_id"] for r in rows]
+
+
+async def set_user_blocked(pool: asyncpg.Pool, tg_id: int, blocked: bool) -> None:
+    await pool.execute(
+        "UPDATE users SET is_blocked = $2, updated_at = now() WHERE tg_id = $1",
+        tg_id,
+        blocked,
+    )
+
+
 async def set_fsm_state(pool: asyncpg.Pool, tg_id: int, state: str | None) -> None:
     """Фиксирует текущее FSM-состояние пользователя (чтобы видеть, где застрял).
 
@@ -176,5 +196,13 @@ async def get_active_subscription(pool: asyncpg.Pool, tg_id: int) -> asyncpg.Rec
         ORDER BY end_date DESC
         LIMIT 1
         """,
+        tg_id,
+    )
+
+
+async def get_last_subscription(pool: asyncpg.Pool, tg_id: int) -> asyncpg.Record | None:
+    """Последняя подписка пользователя независимо от статуса."""
+    return await pool.fetchrow(
+        "SELECT * FROM subscriptions WHERE tg_id = $1 ORDER BY id DESC LIMIT 1",
         tg_id,
     )

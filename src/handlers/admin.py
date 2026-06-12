@@ -5,13 +5,14 @@
 """
 from __future__ import annotations
 
+import asyncio
 from contextlib import suppress
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from html import escape
 
-from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
@@ -38,7 +39,11 @@ def _main_kb() -> InlineKeyboardBuilder:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Ценовые ступени", callback_data="adm:tiers"))
     b.row(InlineKeyboardButton(text="Длительности", callback_data="adm:durs"))
-    b.row(InlineKeyboardButton(text="Добавить участника", callback_data="adm:maddstart"))
+    b.row(
+        InlineKeyboardButton(text="Поиск участника", callback_data="adm:findstart"),
+        InlineKeyboardButton(text="Добавить участника", callback_data="adm:maddstart"),
+    )
+    b.row(InlineKeyboardButton(text="Рассылка", callback_data="adm:bcaststart"))
     b.row(InlineKeyboardButton(text="Статистика", callback_data="adm:stats"))
     b.row(InlineKeyboardButton(text="Закрыть", callback_data="adm:close"))
     return b
@@ -371,6 +376,142 @@ async def adm_member_months(
         reply_markup=_main_kb().as_markup(),
     )
     logger.info(f"⚙️ Админ вручную добавил подписку #{sub_id} для tg_id={tg_id}")
+
+
+# ── Поиск участника / карточка статуса ───────────────────────────────────────
+def _sub_line(sub) -> str:
+    now = datetime.now(timezone.utc)
+    days_left = (sub["end_date"] - now).days
+    src = {"payment": "оплата", "manual": "вручную", "promo": "промокод"}.get(
+        sub["source"], sub["source"]
+    )
+    return (
+        f"{fmt_price(sub['fixed_price'])} ₽/мес · {sub['months']} мес · "
+        f"{sub['start_date']:%d.%m.%Y}–{sub['end_date']:%d.%m.%Y} "
+        f"(осталось {days_left} дн.) · статус {sub['status']} · источник {src}"
+    )
+
+
+async def _user_card(pool: asyncpg.Pool, tg_id: int) -> str:
+    user = await repo.get_user(pool, tg_id)
+    active = await repo.get_active_subscription(pool, tg_id)
+    last = await repo.get_last_subscription(pool, tg_id)
+
+    if user is None and last is None:
+        return f"Пользователь <code>{tg_id}</code> не найден в базе."
+
+    lines = [f"<b>УЧАСТНИК</b> <code>{tg_id}</code>", ""]
+    if user is not None:
+        lines.append(f"Username: @{escape(user['username'] or '—')}")
+        lines.append(f"Имя: {escape(user['first_name'] or '—')}")
+        if user["email"]:
+            lines.append(f"Email: {escape(user['email'])}")
+        if user["is_blocked"]:
+            lines.append("⚠️ Заблокирован")
+    lines.append("")
+
+    if active is not None:
+        lines.append("Подписка: <b>активна</b>")
+        lines.append("  " + _sub_line(active))
+        lines.append("Доступ в клуб: <b>да</b> (по активной подписке)")
+    else:
+        lines.append("Подписка: <b>нет активной</b>")
+        if last is not None:
+            lines.append("Последняя: " + _sub_line(last))
+        lines.append("Доступ в клуб: <b>нет</b>")
+
+    # Статус оплаты (детально) и фактическое членство в группе появятся на этапах 3–4.
+    lines.append("")
+    lines.append("<i>Детальный статус платежей — с этапа 3, членство в группе — с этапа 4.</i>")
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data == "adm:findstart")
+async def adm_find_start(cb: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    await state.set_state(AdminStates.user_lookup)
+    await _show(cb, "Введите Telegram ID участника для проверки статуса:", _cancel_kb())
+
+
+@router.message(AdminStates.user_lookup)
+async def adm_find_result(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.lstrip("-").isdigit():
+        return await message.answer("Введите числовой Telegram ID:")
+    await state.clear()
+    card = await _user_card(pool, int(raw))
+    await message.answer(card, reply_markup=_main_kb().as_markup())
+    logger.info(f"⚙️ Админ смотрел карточку tg_id={raw}")
+
+
+# ── Рассылка по базе (без фото) ──────────────────────────────────────────────
+@router.callback_query(F.data == "adm:bcaststart")
+async def adm_bcast_start(cb: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    await state.set_state(AdminStates.broadcast_text)
+    await _show(
+        cb,
+        "Рассылка по базе.\n\nОтправьте текст сообщения (HTML-разметка поддерживается):",
+        _cancel_kb(),
+    )
+
+
+@router.message(AdminStates.broadcast_text)
+async def adm_bcast_preview(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    text = message.html_text or message.text or ""
+    if not text.strip():
+        return await message.answer("Пустое сообщение. Отправьте текст рассылки:")
+    await state.update_data(bcast_text=text)
+    count = len(await repo.get_all_user_ids(pool))
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text=f"Отправить всем ({count})", callback_data="adm:bcast_go"))
+    b.row(InlineKeyboardButton(text="Отмена", callback_data="adm:menu"))
+    await message.answer(
+        "<b>Предпросмотр рассылки</b>\n\n" + text + f"\n\n— получателей: {count}",
+        reply_markup=b.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "adm:bcast_go")
+async def adm_bcast_go(
+    cb: CallbackQuery, state: FSMContext, bot: Bot, pool: asyncpg.Pool
+) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    data = await state.get_data()
+    text = data.get("bcast_text")
+    await state.clear()
+    if not text:
+        return await _show(cb, "Текст рассылки потерян, начните заново.", _main_kb())
+
+    await cb.answer("Рассылка запущена")
+    with suppress(TelegramBadRequest):
+        await cb.message.edit_text("Рассылка запущена, отправляю...")
+
+    user_ids = await repo.get_all_user_ids(pool)
+    sent = blocked = failed = 0
+    for uid in user_ids:
+        try:
+            await bot.send_message(uid, text)
+            sent += 1
+        except TelegramForbiddenError:
+            blocked += 1
+            await repo.set_user_blocked(pool, uid, True)
+        except TelegramBadRequest:
+            failed += 1
+        await asyncio.sleep(0.05)  # ~20 msg/s — не упираемся в лимиты Telegram
+    await cb.message.answer(
+        f"<b>Рассылка завершена</b>\n\nОтправлено: {sent}\n"
+        f"Заблокировали бота: {blocked}\nОшибки: {failed}",
+        reply_markup=_main_kb().as_markup(),
+    )
+    logger.info(f"📣 Рассылка: отправлено {sent}, заблок. {blocked}, ошибок {failed}")
 
 
 # ── Статистика ───────────────────────────────────────────────────────────────
