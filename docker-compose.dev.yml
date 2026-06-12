@@ -36,6 +36,9 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       REDIS_URL: redis://redis:6379/0
+      # Polling обязателен на Windows: события файлов через bind-mount (inotify)
+      # в Docker Desktop не пробрасываются, без polling hot-reload не сработает.
+      WATCHFILES_FORCE_POLLING: "true"
     # Hot-reload: следим за исходниками и перезапускаем процесс при изменениях.
     command: ["watchfiles", "--filter", "python", "python -m src.main", "src", "migrations"]
     volumes:

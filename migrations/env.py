@@ -35,9 +35,9 @@ def _configure(connection: Connection) -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    # Схема под этот бот. IF NOT EXISTS — существующие данные не затрагиваются.
-    connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
-    connection.execute(text(f'SET search_path TO "{SCHEMA}", public'))
+    # Никаких операций до begin_transaction: иначе SQLAlchemy 2.0 откроет транзакцию
+    # раньше Alembic, тот решит, что ею управляют снаружи, и не закоммитит миграции.
+    # Размещение таблиц в схеме club_bot обеспечивает search_path из server_settings.
     _configure(connection)
     with context.begin_transaction():
         context.run_migrations()
@@ -51,6 +51,12 @@ async def run_async_migrations() -> None:
         # Все соединения работают в нашей схеме.
         connect_args={"server_settings": {"search_path": f"{SCHEMA},public"}},
     )
+    # Схему создаём отдельным ЗАКОММИЧЕННЫМ шагом — она должна существовать до того,
+    # как Alembic создаст в ней свою version-таблицу.
+    async with connectable.connect() as connection:
+        await connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
+        await connection.commit()
+
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()
