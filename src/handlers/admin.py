@@ -392,13 +392,14 @@ def _sub_line(sub) -> str:
     )
 
 
-async def _user_card(pool: asyncpg.Pool, tg_id: int) -> str:
+async def _user_card(pool: asyncpg.Pool, tg_id: int) -> tuple[str, bool]:
+    """Возвращает (текст карточки, есть ли активная подписка)."""
     user = await repo.get_user(pool, tg_id)
     active = await repo.get_active_subscription(pool, tg_id)
     last = await repo.get_last_subscription(pool, tg_id)
 
     if user is None and last is None:
-        return f"Пользователь <code>{tg_id}</code> не найден в базе."
+        return f"Пользователь <code>{tg_id}</code> не найден в базе.", False
 
     lines = [f"<b>УЧАСТНИК</b> <code>{tg_id}</code>", ""]
     if user is not None:
@@ -423,7 +424,17 @@ async def _user_card(pool: asyncpg.Pool, tg_id: int) -> str:
     # Статус оплаты (детально) и фактическое членство в группе появятся на этапах 3–4.
     lines.append("")
     lines.append("<i>Детальный статус платежей — с этапа 3, членство в группе — с этапа 4.</i>")
-    return "\n".join(lines)
+    return "\n".join(lines), active is not None
+
+
+def _card_kb(tg_id: int, has_active: bool) -> InlineKeyboardBuilder:
+    b = InlineKeyboardBuilder()
+    if has_active:
+        b.row(InlineKeyboardButton(
+            text="Аннулировать подписку", callback_data=f"adm:cancelsub:{tg_id}"
+        ))
+    b.row(InlineKeyboardButton(text="В меню", callback_data="adm:menu"))
+    return b
 
 
 @router.callback_query(F.data == "adm:findstart")
@@ -442,9 +453,47 @@ async def adm_find_result(message: Message, state: FSMContext, pool: asyncpg.Poo
     if not raw.lstrip("-").isdigit():
         return await message.answer("Введите числовой Telegram ID:")
     await state.clear()
-    card = await _user_card(pool, int(raw))
-    await message.answer(card, reply_markup=_main_kb().as_markup())
-    logger.info(f"⚙️ Админ смотрел карточку tg_id={raw}")
+    tg_id = int(raw)
+    card, has_active = await _user_card(pool, tg_id)
+    await message.answer(card, reply_markup=_card_kb(tg_id, has_active).as_markup())
+    logger.info(f"⚙️ Админ смотрел карточку tg_id={tg_id}")
+
+
+@router.callback_query(F.data.startswith("adm:card:"))
+async def adm_card_refresh(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    tg_id = int(cb.data.rsplit(":", 1)[1])
+    card, has_active = await _user_card(pool, tg_id)
+    await _show(cb, card, _card_kb(tg_id, has_active))
+
+
+@router.callback_query(F.data.startswith("adm:cancelsub:"))
+async def adm_cancel_confirm(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    tg_id = int(cb.data.rsplit(":", 1)[1])
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Да, аннулировать", callback_data=f"adm:cancelyes:{tg_id}"))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=f"adm:card:{tg_id}"))
+    await _show(
+        cb,
+        f"Аннулировать активную подписку участника <code>{tg_id}</code>?\n\n"
+        "Место освободится. Доступ в группу будет закрыт автоматически (с этапа 4).",
+        b,
+    )
+
+
+@router.callback_query(F.data.startswith("adm:cancelyes:"))
+async def adm_cancel_do(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    tg_id = int(cb.data.rsplit(":", 1)[1])
+    n = await repo.cancel_active_subscriptions(pool, tg_id)
+    await cb.answer(f"Аннулировано подписок: {n}", show_alert=True)
+    logger.info(f"⚙️ Админ аннулировал {n} подписк(и) участника tg_id={tg_id}")
+    card, has_active = await _user_card(pool, tg_id)
+    await _show(cb, card, _card_kb(tg_id, has_active))
 
 
 # ── Рассылка по базе (без фото) ──────────────────────────────────────────────

@@ -206,3 +206,21 @@ async def get_last_subscription(pool: asyncpg.Pool, tg_id: int) -> asyncpg.Recor
         "SELECT * FROM subscriptions WHERE tg_id = $1 ORDER BY id DESC LIMIT 1",
         tg_id,
     )
+
+
+async def cancel_active_subscriptions(pool: asyncpg.Pool, tg_id: int) -> int:
+    """Аннулирует все активные подписки участника (status → cancelled).
+
+    Освобождает место (счётчик активных падает). Возвращает число аннулированных.
+    Фактический кик из группы добавится на этапах 4–5.
+    """
+    rows = await pool.fetch(
+        """
+        UPDATE subscriptions
+        SET status = 'cancelled', updated_at = now()
+        WHERE tg_id = $1 AND status = 'active'
+        RETURNING id
+        """,
+        tg_id,
+    )
+    return len(rows)
