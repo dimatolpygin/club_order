@@ -67,8 +67,9 @@ async def nav_support(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) 
     await _show(cb, pool, "support", texts.SUPPORT, kb.support_kb())
 
 
-# ── Заглушки разделов следующих этапов (тарифы/оплата/промокоды) ──────────────
-@router.callback_query(F.data.in_({kb.NAV_JOIN, kb.NAV_TARIFF, kb.NAV_MYSUB, kb.NAV_RENEW, kb.NAV_PROMO}))
+# ── Заглушки разделов следующих этапов (оплата/подписка/промокоды) ────────────
+# NAV_JOIN/NAV_TARIFF обрабатывает роутер tariffs (этап 2).
+@router.callback_query(F.data.in_({kb.NAV_MYSUB, kb.NAV_RENEW, kb.NAV_PROMO}))
 async def nav_soon(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     screen = (cb.data or "nav:?").split(":", 1)[1]
     await _show(cb, pool, f"soon:{screen}", texts.SOON, kb.to_menu_kb())
