@@ -11,8 +11,9 @@ from datetime import datetime, timezone
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 from redis.asyncio import Redis
@@ -116,22 +117,21 @@ async def pay_check(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
 
 
 # ── Моя подписка ─────────────────────────────────────────────────────────────
-async def render_my_subscription(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
-    """Экран «Моя подписка» — активная карточка либо «нет активной».
+async def _my_subscription_view(
+    pool: asyncpg.Pool, user_id: int
+) -> tuple[str, InlineKeyboardMarkup, bool]:
+    """Собирает (текст, клавиатура, активна_ли) карточки «Моя подписка».
 
-    Вызывается из меню (NAV_MYSUB) и из «Вступить в клуб» для тех, кто уже оплатил
-    (чтобы не показывать им повторно выбор тарифа).
+    Общая основа для кнопки меню (NAV_MYSUB), команды /sub и редиректа оплативших
+    с экрана тарифов.
     """
-    await repo.set_fsm_state(pool, cb.from_user.id, "screen:mysub")
-    sub = await repo.get_active_subscription(pool, cb.from_user.id)
+    sub = await repo.get_active_subscription(pool, user_id)
     if sub is None:
         b = InlineKeyboardBuilder()
         b.row(InlineKeyboardButton(text="Оформить подписку", callback_data=kb.NAV_TARIFF))
         b.row(InlineKeyboardButton(text="Ввести промокод", callback_data=kb.NAV_PROMO))
         b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
-        await _edit(cb, texts.MY_SUB_NONE, b.as_markup())
-        logger.info(f"🤖 Бот → @{cb.from_user.username or '—'}: моя подписка — нет активной")
-        return
+        return texts.MY_SUB_NONE, b.as_markup(), False
 
     days_left = (sub["end_date"] - datetime.now(timezone.utc)).days
     b = InlineKeyboardBuilder()
@@ -139,23 +139,45 @@ async def render_my_subscription(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     b.row(InlineKeyboardButton(text="Продлить подписку", callback_data=kb.NAV_RENEW))
     b.row(InlineKeyboardButton(text="Правила клуба", callback_data=kb.NAV_RULES))
     b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
-    await _edit(
-        cb,
-        texts.my_sub_active(
-            fmt_price(sub["fixed_price"]),
-            sub["start_date"],
-            sub["end_date"],
-            texts.days_left_phrase(days_left),
-            cb.from_user.id,
-        ),
-        b.as_markup(),
+    text = texts.my_sub_active(
+        fmt_price(sub["fixed_price"]),
+        sub["start_date"],
+        sub["end_date"],
+        texts.days_left_phrase(days_left),
+        user_id,
     )
+    return text, b.as_markup(), True
+
+
+async def render_my_subscription(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    """Карточка «Моя подписка» через редактирование сообщения (callback-путь).
+
+    Вызывается из меню (NAV_MYSUB) и из «Вступить в клуб» для тех, кто уже оплатил.
+    """
+    await repo.set_fsm_state(pool, cb.from_user.id, "screen:mysub")
+    text, markup, active = await _my_subscription_view(pool, cb.from_user.id)
+    await _edit(cb, text, markup)
     logger.info(
-        f"🤖 Бот → @{cb.from_user.username or '—'}: моя подписка активна "
-        f"(осталось {days_left} дн.)"
+        f"🤖 Бот → @{cb.from_user.username or '—'}: моя подписка "
+        f"({'активна' if active else 'нет активной'})"
     )
 
 
 @router.callback_query(F.data == kb.NAV_MYSUB)
 async def my_subscription(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     await render_my_subscription(cb, pool)
+
+
+@router.message(Command("sub"))
+async def cmd_sub(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    """Команда /sub — статус подписки отдельным сообщением."""
+    await state.clear()
+    u = message.from_user
+    await repo.upsert_user(pool, u.id, u.username, u.first_name)
+    await repo.set_fsm_state(pool, u.id, "screen:mysub")
+    text, markup, active = await _my_subscription_view(pool, u.id)
+    await message.answer(text, reply_markup=markup)
+    logger.info(
+        f"🤖 Бот → @{u.username or '—'}: /sub — подписка "
+        f"({'активна' if active else 'нет активной'})"
+    )

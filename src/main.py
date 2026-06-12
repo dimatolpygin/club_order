@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from . import __version__
@@ -55,6 +56,11 @@ async def main() -> None:
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
+        await bot.set_my_commands([
+            BotCommand(command="start", description="Главный экран"),
+            BotCommand(command="menu", description="Главное меню"),
+            BotCommand(command="sub", description="Статус моей подписки"),
+        ])
         me = await bot.get_me()
         scheduler.start()
         log.info(
