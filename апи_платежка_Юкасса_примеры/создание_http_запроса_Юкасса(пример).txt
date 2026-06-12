@@ -1,0 +1,41 @@
+https://api.yookassa.ru/v3/payments
+
+
+
+{
+  "amount": {
+    "value": "{{ $json.price }}",
+    "currency": "RUB"
+  },
+  "capture": true,
+  "confirmation": {
+    "type": "redirect",
+    "return_url": "https://t.me/photolike_ai_bot"
+  },
+  "description": "Заказ №{{ $now.toMillis() }}",
+  "metadata": {
+    "order_id": "{{ $now.toMillis() }}",
+    "chat_id": "{{ $('Telegram Trigger').item.json.callback_query.message.chat.id }}",
+    "user_name": "{{ $('Telegram Trigger').item.json.callback_query.message.chat.username }}",
+    "tariff_id": "{{ $('Telegram Trigger').item.json.callback_query.data.split('(')[1].split(')')[0] }}",
+    "email": "{{ $('Execute a SQL query1').item.json.email }}"
+  },
+  "receipt": {
+    "customer": { 
+      "email": "{{ $('Execute a SQL query1').item.json.email }}"
+    },
+    "items": [
+      {
+        "description": "{{ $json.attempts_count }} попыток генерации изображений",
+        "quantity": "1.0",
+        "amount": {
+          "value": "{{ $json.price }}",
+          "currency": "RUB"
+        },
+        "vat_code": 1,
+        "payment_subject": "service",
+        "payment_mode": "full_prepayment"
+      }
+    ]
+  }
+}

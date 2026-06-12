@@ -1,0 +1,26 @@
+ЮKassa вернёт объект платежа.
+
+Из ответа нужно сохранить:
+
+id → yookassa_payment_id
+status → pending
+confirmation.confirmation_url → ссылка на оплату
+amount.value → сумма
+created_at → дата создания
+metadata → служебные данные
+
+Пример:
+
+{
+  "id": "2f32abcd-000f-5000-8000-18f3d1c12345",
+  "status": "pending",
+  "paid": false,
+  "amount": {
+    "value": "3333.00",
+    "currency": "RUB"
+  },
+  "confirmation": {
+    "type": "redirect",
+    "confirmation_url": "https://yoomoney.ru/checkout/payments/v2/contract?orderId=..."
+  }
+}
