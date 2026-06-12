@@ -17,6 +17,7 @@ from .. import repo
 
 _TIERS_KEY = "cache:tiers"
 _DURATIONS_KEY = "cache:durations"
+_PRICES_KEY = "cache:tier_prices"
 _TTL = 300  # сек
 
 
@@ -49,9 +50,46 @@ async def _cached_active_durations(pool: asyncpg.Pool, redis: Redis) -> list[dic
     return durations
 
 
+async def _cached_tier_prices(pool: asyncpg.Pool, redis: Redis) -> dict[str, dict[str, str]]:
+    """Матрица переопределений цены: {tier_id: {months: price}} (ключи — строки для JSON)."""
+    raw = await redis.get(_PRICES_KEY)
+    if raw is not None:
+        return json.loads(raw)
+    rows = await repo.get_all_tier_prices(pool)
+    matrix: dict[str, dict[str, str]] = {}
+    for r in rows:
+        matrix.setdefault(str(r["tier_id"]), {})[str(r["months"])] = str(r["price"])
+    await redis.set(_PRICES_KEY, json.dumps(matrix), ex=_TTL)
+    return matrix
+
+
 async def invalidate(redis: Redis) -> None:
-    """Сбросить кеш тарифов/длительностей (вызывать после правки админом)."""
-    await redis.delete(_TIERS_KEY, _DURATIONS_KEY)
+    """Сбросить кеш тарифов/длительностей/цен (вызывать после правки админом)."""
+    await redis.delete(_TIERS_KEY, _DURATIONS_KEY, _PRICES_KEY)
+
+
+async def period_price(
+    pool: asyncpg.Pool, redis: Redis, tier: dict, months: int
+) -> Decimal:
+    """Цена за период внутри ступени: переопределение из матрицы или ставка×месяцы."""
+    matrix = await _cached_tier_prices(pool, redis)
+    override = matrix.get(str(tier["id"]), {}).get(str(months))
+    if override is not None:
+        return Decimal(override)
+    return tier["monthly_price"] * months
+
+
+async def prices_for(
+    pool: asyncpg.Pool, redis: Redis, tier: dict, months_list: list[int]
+) -> dict[int, Decimal]:
+    """Цены за набор периодов одним проходом (для экрана выбора длительности)."""
+    matrix = await _cached_tier_prices(pool, redis)
+    overrides = matrix.get(str(tier["id"]), {})
+    result: dict[int, Decimal] = {}
+    for m in months_list:
+        ov = overrides.get(str(m))
+        result[m] = Decimal(ov) if ov is not None else tier["monthly_price"] * m
+    return result
 
 
 async def get_current_tier(pool: asyncpg.Pool, redis: Redis) -> dict | None:

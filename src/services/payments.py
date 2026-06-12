@@ -45,7 +45,10 @@ async def start_payment(
 
     months: int = duration["months"]
     monthly: Decimal = tier["monthly_price"]
-    amount = monthly * months
+    # Сумма к оплате — цена за период (матрица ступень×период), может отличаться
+    # от ставка×месяцы. Фиксируем за пользователем именно МЕСЯЧНУЮ ставку (monthly)
+    # — по ней пойдут продления; итоговая сумма покупки берётся из матрицы.
+    amount = await tariffs.period_price(pool, redis, tier, months)
     user = await repo.get_user(pool, tg_id)
     description = f"Подписка в клуб «11:11» — {months} мес"
     receipt = build_receipt(user, description, amount)

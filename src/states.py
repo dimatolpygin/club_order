@@ -16,6 +16,7 @@ class AdminStates(StatesGroup):
     tier_price = State()
     tier_limit = State()
     tier_name = State()
+    tier_period_price = State()  # цена за конкретный период внутри ступени (data: tier_id, months)
     dur_add = State()
     member_id = State()
     member_months = State()

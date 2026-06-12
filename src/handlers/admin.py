@@ -130,7 +130,8 @@ async def _tier_menu(cb: CallbackQuery, pool: asyncpg.Pool, tier_id: int) -> Non
         "Что меняем?"
     )
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="Цена", callback_data=f"adm:tprice:{tier_id}"))
+    b.row(InlineKeyboardButton(text="Цена за 1 мес (ставка)", callback_data=f"adm:tprice:{tier_id}"))
+    b.row(InlineKeyboardButton(text="Цены за периоды (3/6/12…)", callback_data=f"adm:tperiods:{tier_id}"))
     b.row(InlineKeyboardButton(text="Лимит мест", callback_data=f"adm:tlimit:{tier_id}"))
     b.row(InlineKeyboardButton(text="Название", callback_data=f"adm:tname:{tier_id}"))
     b.row(InlineKeyboardButton(
@@ -254,6 +255,102 @@ async def adm_tier_name_set(
         reply_markup=_main_kb().as_markup(),
     )
     logger.info(f"⚙️ Админ: название ступени #{tier_id} = {name}")
+
+
+# ── Цены за периоды внутри ступени (матрица ступень×период) ───────────────────
+async def _periods_menu(cb: CallbackQuery, pool: asyncpg.Pool, tier_id: int) -> None:
+    t = await repo.get_tier(pool, tier_id)
+    if t is None:
+        return await _show(cb, "Ступень не найдена.", _main_kb())
+    monthly = t["monthly_price"]
+    durations = await repo.get_active_durations(pool)
+    overrides = await repo.get_tier_prices(pool, tier_id)
+    lines = [
+        f"<b>ЦЕНЫ ЗА ПЕРИОДЫ — ступень #{tier_id} «{escape(t['name'])}»</b>",
+        f"Ставка за 1 мес: {fmt_price(monthly)} ₽",
+        "<i>Период без своей цены считается как ставка×месяцы. Можно задать любую цену.</i>",
+        "",
+    ]
+    b = InlineKeyboardBuilder()
+    multi = [d for d in durations if d["months"] > 1]
+    if not multi:
+        lines.append("Нет активных периодов длиннее 1 мес.")
+    for d in multi:
+        m = d["months"]
+        custom = m in overrides
+        price = overrides[m] if custom else monthly * m
+        lines.append(f"{m} мес — {fmt_price(price)} ₽ ({'своя' if custom else 'авто'})")
+        b.row(InlineKeyboardButton(
+            text=f"✎ {m} мес — {fmt_price(price)} ₽",
+            callback_data=f"adm:tpset:{tier_id}:{m}",
+        ))
+        if custom:
+            b.row(InlineKeyboardButton(
+                text=f"↺ Сброс {m} мес (к ставка×{m})",
+                callback_data=f"adm:tpreset:{tier_id}:{m}",
+            ))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=f"adm:tier:{tier_id}"))
+    await _show(cb, "\n".join(lines), b)
+
+
+@router.callback_query(F.data.startswith("adm:tperiods:"))
+async def adm_tier_periods(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    await _periods_menu(cb, pool, int(cb.data.rsplit(":", 1)[1]))
+
+
+@router.callback_query(F.data.startswith("adm:tpset:"))
+async def adm_tier_period_set_start(cb: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    _, _, tier_id, months = cb.data.split(":")
+    await state.set_state(AdminStates.tier_period_price)
+    await state.update_data(tier_id=int(tier_id), months=int(months))
+    await _show(
+        cb,
+        f"Введите цену за {months} мес в рублях (например 3000). "
+        "Это итоговая сумма за весь период, не за месяц:",
+        _cancel_kb(),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:tpreset:"))
+async def adm_tier_period_reset(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    _, _, tier_id, months = cb.data.split(":")
+    await repo.delete_tier_price(pool, int(tier_id), int(months))
+    await tariffs.invalidate(redis)
+    logger.info(f"⚙️ Админ: сброс цены {months} мес ступени #{tier_id} (к ставка×мес)")
+    await _periods_menu(cb, pool, int(tier_id))
+
+
+@router.message(AdminStates.tier_period_price)
+async def adm_tier_period_set(
+    message: Message, state: FSMContext, pool: asyncpg.Pool, redis: Redis
+) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    try:
+        price = Decimal((message.text or "").replace(",", ".").strip())
+        if price <= 0:
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        return await message.answer("Не похоже на цену. Введите число, например 3000:")
+    data = await state.get_data()
+    tier_id, months = data["tier_id"], data["months"]
+    await repo.set_tier_price(pool, tier_id, months, price)
+    await tariffs.invalidate(redis)
+    await state.clear()
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="К периодам", callback_data=f"adm:tperiods:{tier_id}"))
+    b.row(InlineKeyboardButton(text="В меню", callback_data="adm:menu"))
+    await message.answer(
+        f"Цена за {months} мес ступени #{tier_id}: {fmt_price(price)} ₽.",
+        reply_markup=b.as_markup(),
+    )
+    logger.info(f"⚙️ Админ: цена {months} мес ступени #{tier_id} = {price}")
 
 
 # ── Длительности ─────────────────────────────────────────────────────────────

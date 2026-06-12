@@ -50,11 +50,12 @@ async def show_tariffs(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
 
     monthly = tier["monthly_price"]
     durations = await tariffs.get_active_durations(pool, redis)
+    prices = await tariffs.prices_for(pool, redis, tier, [d["months"] for d in durations])
 
     b = InlineKeyboardBuilder()
     for d in durations:
         months = d["months"]
-        total = monthly * months
+        total = prices[months]
         b.row(
             InlineKeyboardButton(
                 text=f"{months} мес — {fmt_price(total)} ₽",
@@ -80,7 +81,7 @@ async def show_summary(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
 
     months = duration["months"]
     monthly: Decimal = tier["monthly_price"]
-    total = monthly * months
+    total = await tariffs.period_price(pool, redis, tier, months)
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:summary:{months}m")
 
     b = InlineKeyboardBuilder()

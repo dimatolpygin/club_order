@@ -96,6 +96,42 @@ async def update_tier(pool: asyncpg.Pool, tier_id: int, **fields) -> bool:
     return row is not None
 
 
+# ── Цены за период внутри ступени (tier_prices) ──────────────────────────────
+async def get_all_tier_prices(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    return await pool.fetch("SELECT tier_id, months, price FROM tier_prices")
+
+
+async def get_tier_prices(pool: asyncpg.Pool, tier_id: int) -> dict[int, "Decimal"]:
+    """Переопределения цены {месяцы: цена} для одной ступени."""
+    rows = await pool.fetch(
+        "SELECT months, price FROM tier_prices WHERE tier_id = $1", tier_id
+    )
+    return {r["months"]: r["price"] for r in rows}
+
+
+async def set_tier_price(
+    pool: asyncpg.Pool, tier_id: int, months: int, price: Decimal | int | float
+) -> None:
+    await pool.execute(
+        """
+        INSERT INTO tier_prices(tier_id, months, price)
+        VALUES($1, $2, $3)
+        ON CONFLICT (tier_id, months) DO UPDATE
+            SET price = EXCLUDED.price, updated_at = now()
+        """,
+        tier_id,
+        months,
+        Decimal(str(price)),
+    )
+
+
+async def delete_tier_price(pool: asyncpg.Pool, tier_id: int, months: int) -> None:
+    """Сброс переопределения — период снова считается как ставка×месяцы."""
+    await pool.execute(
+        "DELETE FROM tier_prices WHERE tier_id = $1 AND months = $2", tier_id, months
+    )
+
+
 async def count_active_members(pool: asyncpg.Pool) -> int:
     """Сколько мест в клубе занято = число участников с активной подпиской.
 
