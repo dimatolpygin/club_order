@@ -90,6 +90,31 @@ def sub_ended_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
+def reminder_early_kb() -> InlineKeyboardMarkup:
+    """Напоминание «осталось N» (экран 14): продлить · моя подписка."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Продлить подписку", callback_data=NAV_RENEW))
+    b.row(InlineKeyboardButton(text="Моя подписка", callback_data=NAV_MYSUB))
+    return b.as_markup()
+
+
+def reminder_soon_kb() -> InlineKeyboardMarkup:
+    """Напоминание «завтра заканчивается» (экран 15): продлить сейчас · поддержка."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Продлить сейчас", callback_data=NAV_RENEW))
+    b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
+    return b.as_markup()
+
+
+def reminder_last_kb() -> InlineKeyboardMarkup:
+    """Напоминание «последний день» (экран 16): продлить · моя подписка · поддержка."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Продлить подписку", callback_data=NAV_RENEW))
+    b.row(InlineKeyboardButton(text="Моя подписка", callback_data=NAV_MYSUB))
+    b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
+    return b.as_markup()
+
+
 def to_menu_kb() -> InlineKeyboardMarkup:
     """Кнопка в главное меню (для заглушек и подтверждений)."""
     b = InlineKeyboardBuilder()

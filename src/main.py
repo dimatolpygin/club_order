@@ -17,7 +17,7 @@ from .db import close_pool, init_pool
 from .handlers import get_main_router
 from .logger import setup_logging
 from .middlewares import LoggingMiddleware
-from .services import payments, subscriptions
+from .services import payments, reminders, subscriptions
 
 
 async def main() -> None:
@@ -63,6 +63,16 @@ async def main() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # Напоминания о продлении: за несколько дней / за день / в последний день.
+    scheduler.add_job(
+        reminders.run_reminder_check,
+        "interval",
+        minutes=settings.reminder_check_interval_min,
+        args=[pool, bot],
+        id="send_reminders",
+        max_instances=1,
+        coalesce=True,
+    )
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
@@ -79,7 +89,11 @@ async def main() -> None:
         log.info(
             f"✅ Бот @{me.username} запущен (polling); поллер платежей каждые "
             f"{settings.payment_poll_interval_min} мин; проверка окончаний каждые "
-            f"{settings.expiry_check_interval_min} мин; апдейты: {allowed}"
+            f"{settings.expiry_check_interval_min} мин; напоминания каждые "
+            f"{settings.reminder_check_interval_min} мин "
+            f"(пороги {settings.reminder_early_offset}/{settings.reminder_soon_offset}/"
+            f"{settings.reminder_last_offset} {settings.reminder_unit}); "
+            f"апдейты: {allowed}"
         )
         await dp.start_polling(bot, allowed_updates=allowed)
     finally:

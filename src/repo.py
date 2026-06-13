@@ -434,6 +434,51 @@ async def expire_due_subscriptions(pool: asyncpg.Pool) -> list[asyncpg.Record]:
     )
 
 
+# ── Напоминания о продлении (subscription_reminders, этап 6) ──────────────────
+async def get_subscriptions_for_reminders(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Активные ещё не истёкшие подписки + уже отправленные по ним типы напоминаний.
+
+    Возвращает строки с полями подписки/пользователя и массивом `sent` (типы
+    напоминаний, уже отправленные по этой подписке) — джоб по нему решает, что
+    ещё нужно отправить.
+    """
+    return await pool.fetch(
+        """
+        SELECT s.id, s.tg_id, s.end_date, s.fixed_price, s.unit,
+               u.username, u.first_name,
+               COALESCE(
+                   array_agg(r.kind) FILTER (WHERE r.kind IS NOT NULL),
+                   ARRAY[]::text[]
+               ) AS sent
+        FROM subscriptions s
+        JOIN users u ON u.tg_id = s.tg_id
+        LEFT JOIN subscription_reminders r ON r.subscription_id = s.id
+        WHERE s.status = 'active' AND s.end_date > now()
+        GROUP BY s.id, u.username, u.first_name
+        """
+    )
+
+
+async def claim_reminder(pool: asyncpg.Pool, subscription_id: int, kind: str) -> bool:
+    """Атомарно «занимает» отправку напоминания (подписка, тип). True — занято нами.
+
+    INSERT ... ON CONFLICT DO NOTHING: если строка уже была (напоминание этого типа
+    отправлялось), вернётся False и сообщение повторно не уйдёт — защита от дублей
+    при повторных прогонах планировщика и гонке параллельных проходов.
+    """
+    row = await pool.fetchrow(
+        """
+        INSERT INTO subscription_reminders(subscription_id, kind)
+        VALUES($1, $2)
+        ON CONFLICT (subscription_id, kind) DO NOTHING
+        RETURNING subscription_id
+        """,
+        subscription_id,
+        kind,
+    )
+    return row is not None
+
+
 async def cancel_active_subscriptions(pool: asyncpg.Pool, tg_id: int) -> int:
     """Аннулирует все активные подписки участника (status → cancelled).
 
