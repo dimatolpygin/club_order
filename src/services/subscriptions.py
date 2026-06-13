@@ -18,8 +18,11 @@ from ..config import settings
 from ..logger import logger
 
 
-async def _kick_from_group(bot: Bot, tg_id: int) -> None:
-    """Удаляет пользователя из группы с возможностью повторного вступления."""
+async def kick_from_group(bot: Bot, tg_id: int, reason: str = "подписка истекла") -> None:
+    """Удаляет пользователя из группы с возможностью повторного вступления.
+
+    Используется и фоновой проверкой окончаний, и ручным аннулированием из админки.
+    """
     club_id = settings.club_chat_id_int
     if club_id is None:
         return
@@ -27,7 +30,7 @@ async def _kick_from_group(bot: Bot, tg_id: int) -> None:
         await bot.ban_chat_member(club_id, tg_id)
         # Сразу снимаем бан — это «кик»: убрали из чата, но вход не запрещён навсегда.
         await bot.unban_chat_member(club_id, tg_id)
-        logger.info(f"👢 Кик из группы: tg_id={tg_id} (подписка истекла)")
+        logger.info(f"👢 Кик из группы: tg_id={tg_id} ({reason})")
     except Exception as e:  # noqa: BLE001 — мог уже выйти / бот не админ
         logger.warning(f"Не удалось кикнуть tg_id={tg_id} из группы: {e}")
 
@@ -46,7 +49,7 @@ async def run_expiry_check(pool: asyncpg.Pool, bot: Bot) -> None:
     for row in expired:
         tg_id = row["tg_id"]
         try:
-            await _kick_from_group(bot, tg_id)
+            await kick_from_group(bot, tg_id)
             await _notify_ended(bot, tg_id)
             logger.info(f"🔚 Подписка #{row['id']} завершена (tg_id={tg_id})")
         except Exception as e:  # noqa: BLE001 — один юзер не должен ронять цикл

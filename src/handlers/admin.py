@@ -23,7 +23,7 @@ from redis.asyncio import Redis
 from .. import repo
 from ..config import settings
 from ..logger import logger
-from ..services import tariffs
+from ..services import subscriptions, tariffs
 from ..states import AdminStates
 from ..utils import add_months, fmt_price
 
@@ -576,17 +576,20 @@ async def adm_cancel_confirm(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     await _show(
         cb,
         f"Аннулировать активную подписку участника <code>{tg_id}</code>?\n\n"
-        "Место освободится. Доступ в группу будет закрыт автоматически (с этапа 4).",
+        "Место освободится, и участник будет сразу удалён из закрытой группы.",
         b,
     )
 
 
 @router.callback_query(F.data.startswith("adm:cancelyes:"))
-async def adm_cancel_do(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def adm_cancel_do(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
     if not _is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
     tg_id = int(cb.data.rsplit(":", 1)[1])
     n = await repo.cancel_active_subscriptions(pool, tg_id)
+    # Аннулирование освобождает место — сразу удаляем участника из закрытой группы.
+    if n > 0:
+        await subscriptions.kick_from_group(bot, tg_id, reason="подписка аннулирована админом")
     await cb.answer(f"Аннулировано подписок: {n}", show_alert=True)
     logger.info(f"⚙️ Админ аннулировал {n} подписк(и) участника tg_id={tg_id}")
     card, has_active = await _user_card(pool, tg_id)
