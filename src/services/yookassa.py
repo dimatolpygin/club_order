@@ -10,6 +10,7 @@ aiohttp поставляется как зависимость aiogram, отде
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from decimal import Decimal
 
@@ -66,8 +67,10 @@ async def create_payment(
                     logger.error(f"ЮKassa create_payment HTTP {resp.status}: {data}")
                     raise YooKassaError(f"Создание платежа отклонено (HTTP {resp.status})")
                 return data
-    except aiohttp.ClientError as e:
-        logger.error(f"ЮKassa create_payment сеть: {e}")
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        # asyncio.TimeoutError (= TimeoutError) — таймаут ClientTimeout, он НЕ
+        # подкласс ClientError, поэтому ловим явно, иначе хендлер молча зависает.
+        logger.error(f"ЮKassa create_payment сеть/таймаут: {e!r}")
         raise YooKassaError("Сеть недоступна при создании платежа") from e
 
 
@@ -81,6 +84,6 @@ async def get_payment(payment_id: str) -> dict:
                     logger.error(f"ЮKassa get_payment HTTP {resp.status}: {data}")
                     raise YooKassaError(f"Не удалось получить платёж (HTTP {resp.status})")
                 return data
-    except aiohttp.ClientError as e:
-        logger.error(f"ЮKassa get_payment сеть: {e}")
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        logger.error(f"ЮKassa get_payment сеть/таймаут: {e!r}")
         raise YooKassaError("Сеть недоступна при проверке платежа") from e
