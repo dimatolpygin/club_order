@@ -60,6 +60,22 @@ class Settings(BaseSettings):
     # эта заглушка — fallback, пока сбор email не включён. Меняется одной настройкой.
     receipt_email_placeholder: str = "receipt@example.com"
 
+    # ── S3-хранилище (фото в рассылке, этап 8) ───────────────────────────────
+    # S3-совместимое хранилище (Beget). Пусто — загрузка фото отключена,
+    # рассылка работает только текстом.
+    s3_endpoint: str = ""
+    s3_region: str = ""
+    s3_bucket: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    # Базовый публичный URL (обычно совпадает с endpoint). Итоговая ссылка —
+    # f"{s3_public_base_url}/{s3_bucket}/{key}".
+    s3_public_base_url: str = ""
+
+    @property
+    def s3_enabled(self) -> bool:
+        return bool(self.s3_endpoint and self.s3_bucket and self.s3_access_key)
+
     # ── Прочее ───────────────────────────────────────────────────────────────
     log_level: str = "INFO"
 

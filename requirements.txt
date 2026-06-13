@@ -7,3 +7,4 @@ loguru==0.7.3
 SQLAlchemy[asyncio]==2.0.36
 alembic==1.14.0
 watchfiles==1.0.3
+boto3==1.35.0

@@ -28,7 +28,7 @@ class AdminStates(StatesGroup):
     member_value = State()    # ввод числа срока выдаваемой подписки
     member_unit = State()     # выбор единицы срока (data: member_tg_id, member_value)
     user_lookup = State()    # поиск участника по tg_id
-    broadcast_text = State()  # текст рассылки (подтверждение — кнопкой)
+    broadcast_compose = State()  # сбор текста и/или фото рассылки (отправка — кнопкой)
     # Создание промокода (тип и фиксация цены — кнопками, остальное вводом).
     promo_code = State()      # ввод самого кода
     promo_value = State()     # значение (ставка ₽/мес или процент), data: kind

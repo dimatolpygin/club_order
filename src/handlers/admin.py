@@ -15,7 +15,9 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
+from aiogram.types import (
+    CallbackQuery, InlineKeyboardButton, InputMediaPhoto, Message,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 from redis.asyncio import Redis
@@ -23,7 +25,9 @@ from redis.asyncio import Redis
 from .. import repo, texts
 from ..config import settings
 from ..logger import logger
-from ..services import app_settings, promo as promo_service, subscriptions, tariffs
+from ..services import (
+    app_settings, promo as promo_service, storage, subscriptions, tariffs,
+)
 from ..states import AdminStates
 from ..utils import add_period, fmt_price
 
@@ -712,35 +716,131 @@ async def adm_cancel_do(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None
     await _show(cb, card, _card_kb(tg_id, has_active))
 
 
-# ── Рассылка по базе (без фото) ──────────────────────────────────────────────
+# ── Рассылка по базе (текст и/или фото-альбом) ───────────────────────────────
+_BCAST_MAX_PHOTOS = 10  # лимит Telegram на media_group
+
+
+def _bcast_compose_kb(count: int) -> InlineKeyboardBuilder:
+    b = InlineKeyboardBuilder()
+    if count > 0:
+        b.row(InlineKeyboardButton(text="Готово — к предпросмотру", callback_data="adm:bcast_ready"))
+    b.row(InlineKeyboardButton(text="Отмена", callback_data="adm:menu"))
+    return b
+
+
 @router.callback_query(F.data == "adm:bcaststart")
 async def adm_bcast_start(cb: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
-    await state.set_state(AdminStates.broadcast_text)
+    await state.set_state(AdminStates.broadcast_compose)
+    await state.update_data(bcast_text=None, bcast_photos=[])
+    photo_note = (
+        "Можно приложить фото (по одному или альбомом, до 10) и/или текст."
+        if settings.s3_enabled
+        else "Фото недоступны (S3 не настроен) — доступна только текстовая рассылка."
+    )
     await _show(
         cb,
-        "Рассылка по базе.\n\nОтправьте текст сообщения (HTML-разметка поддерживается):",
+        "<b>Рассылка по базе</b>\n\n"
+        f"{photo_note}\n\n"
+        "Отправляйте сообщения, затем нажмите «Готово». HTML-разметка в тексте "
+        "и подписи поддерживается.",
         _cancel_kb(),
     )
 
 
-@router.message(AdminStates.broadcast_text)
-async def adm_bcast_preview(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+@router.message(AdminStates.broadcast_compose, F.photo)
+async def adm_bcast_add_photo(
+    message: Message, state: FSMContext, bot: Bot
+) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    if not settings.s3_enabled:
+        return await message.answer("Фото недоступны: S3 не настроен. Пришлите текст.")
+    data = await state.get_data()
+    photos = list(data.get("bcast_photos") or [])
+    if len(photos) >= _BCAST_MAX_PHOTOS:
+        return await message.answer(f"Уже добавлено максимум фото ({_BCAST_MAX_PHOTOS}).")
+    file_id = message.photo[-1].file_id
+    try:
+        buf = await bot.download(message.photo[-1])
+        url = await storage.upload_photo(buf.read(), "jpg")
+    except Exception as e:  # noqa: BLE001 — ошибка загрузки не должна ронять сценарий
+        logger.error(f"Рассылка: не удалось загрузить фото в S3: {e}")
+        return await message.answer("Не удалось загрузить фото в хранилище. Попробуйте ещё раз.")
+    photos.append({"url": url, "file_id": file_id})
+    # Подпись из фото берём, если текст ещё не задан.
+    caption = message.html_text or message.caption
+    updates = {"bcast_photos": photos}
+    if caption and not data.get("bcast_text"):
+        updates["bcast_text"] = caption
+    await state.update_data(**updates)
+    await message.answer(
+        f"Фото добавлено (всего: {len(photos)}).",
+        reply_markup=_bcast_compose_kb(len(photos)).as_markup(),
+    )
+
+
+@router.message(AdminStates.broadcast_compose, F.text)
+async def adm_bcast_add_text(message: Message, state: FSMContext) -> None:
     if not _is_admin(message.from_user.id):
         return
     text = message.html_text or message.text or ""
     if not text.strip():
-        return await message.answer("Пустое сообщение. Отправьте текст рассылки:")
+        return await message.answer("Пустое сообщение. Пришлите текст или фото.")
     await state.update_data(bcast_text=text)
+    count = len((await state.get_data()).get("bcast_photos") or [])
+    await message.answer(
+        "Текст сохранён.",
+        reply_markup=_bcast_compose_kb(max(count, 1)).as_markup(),
+    )
+
+
+@router.callback_query(F.data == "adm:bcast_ready")
+async def adm_bcast_ready(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    data = await state.get_data()
+    text = data.get("bcast_text")
+    photos = data.get("bcast_photos") or []
+    if not text and not photos:
+        return await _show(cb, "Пока нечего отправлять — добавьте текст или фото.", _cancel_kb())
     count = len(await repo.get_all_user_ids(pool))
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text=f"Отправить всем ({count})", callback_data="adm:bcast_go"))
     b.row(InlineKeyboardButton(text="Отмена", callback_data="adm:menu"))
-    await message.answer(
-        "<b>Предпросмотр рассылки</b>\n\n" + text + f"\n\n— получателей: {count}",
-        reply_markup=b.as_markup(),
+    preview = (
+        "<b>Предпросмотр рассылки</b>\n\n"
+        f"Фото: {len(photos)}\n"
+        f"Текст: {text if text else '—'}\n\n"
+        f"Получателей: {count}"
     )
+    await _show(cb, preview, b)
+
+
+def _bcast_media(photos: list[dict], text: str | None, by_url: bool) -> list[InputMediaPhoto]:
+    """Собирает media_group; подпись — только на первом фото."""
+    key = "url" if by_url else "file_id"
+    return [
+        InputMediaPhoto(media=p[key], caption=text if (i == 0 and text) else None)
+        for i, p in enumerate(photos)
+    ]
+
+
+async def _bcast_send_one(bot: Bot, uid: int, text: str | None, photos: list[dict]) -> None:
+    """Отправляет один экземпляр рассылки. URL из S3, при сбое — fallback на file_id."""
+    if not photos:
+        await bot.send_message(uid, text)
+    elif len(photos) == 1:
+        try:
+            await bot.send_photo(uid, photos[0]["url"], caption=text)
+        except TelegramBadRequest:
+            await bot.send_photo(uid, photos[0]["file_id"], caption=text)
+    else:
+        try:
+            await bot.send_media_group(uid, _bcast_media(photos, text, by_url=True))
+        except TelegramBadRequest:
+            await bot.send_media_group(uid, _bcast_media(photos, text, by_url=False))
 
 
 @router.callback_query(F.data == "adm:bcast_go")
@@ -751,9 +851,10 @@ async def adm_bcast_go(
         return await cb.answer("Нет доступа", show_alert=True)
     data = await state.get_data()
     text = data.get("bcast_text")
+    photos = data.get("bcast_photos") or []
     await state.clear()
-    if not text:
-        return await _show(cb, "Текст рассылки потерян, начните заново.", _main_kb())
+    if not text and not photos:
+        return await _show(cb, "Рассылка потеряна, начните заново.", _main_kb())
 
     await cb.answer("Рассылка запущена")
     with suppress(TelegramBadRequest):
@@ -763,20 +864,24 @@ async def adm_bcast_go(
     sent = blocked = failed = 0
     for uid in user_ids:
         try:
-            await bot.send_message(uid, text)
+            await _bcast_send_one(bot, uid, text, photos)
             sent += 1
         except TelegramForbiddenError:
             blocked += 1
             await repo.set_user_blocked(pool, uid, True)
         except TelegramBadRequest:
             failed += 1
-        await asyncio.sleep(0.05)  # ~20 msg/s — не упираемся в лимиты Telegram
+        # Альбом = несколько сообщений, шлём чуть медленнее, чтобы не упереться в лимиты.
+        await asyncio.sleep(0.1 if photos else 0.05)
     await cb.message.answer(
         f"<b>Рассылка завершена</b>\n\nОтправлено: {sent}\n"
         f"Заблокировали бота: {blocked}\nОшибки: {failed}",
         reply_markup=_main_kb().as_markup(),
     )
-    logger.info(f"📣 Рассылка: отправлено {sent}, заблок. {blocked}, ошибок {failed}")
+    logger.info(
+        f"📣 Рассылка ({len(photos)} фото): отправлено {sent}, заблок. {blocked}, "
+        f"ошибок {failed}"
+    )
 
 
 # ── Промокоды ────────────────────────────────────────────────────────────────
