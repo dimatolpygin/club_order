@@ -1,0 +1,8 @@
+# Единые LF-переводы строк в репозитории. Критично для *.sh — CRLF (Windows)
+# ломает запуск bash-скриптов на Linux-сервере.
+* text=auto eol=lf
+
+# Бинарные файлы не трогаем.
+*.png binary
+*.jpg binary
+*.pdf binary

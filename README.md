@@ -50,8 +50,44 @@ docker compose -f docker-compose.dev.yml down
 
 ## Прод / сервер
 
-Деплой настраивается на этапе 9 (CI/CD GitHub Actions + `scripts/install.sh`).
-Прод-стек — `docker compose up -d --build` (см. `docker-compose.yml`).
+Прод-стек самодостаточный (бот + свои Postgres и Redis): `docker-compose.yml`,
+данные в именованных томах, миграции применяются при старте.
+
+### Первичная установка на чистой Ubuntu
+
+Одной командой через интерактивный установщик (ставит Docker, клонирует репозиторий,
+спрашивает токены/ключи, генерирует пароль БД, поднимает стек):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dimatolpygin/club_order/master/scripts/install.sh -o install.sh
+bash install.sh
+```
+
+После установки сделайте бота **администратором** закрытой группы (права одобрять
+заявки на вступление и банить — нужно для авто-доступа).
+
+### Автодеплой (CI/CD)
+
+Push в ветку `master` → GitHub Actions заходит на сервер по SSH, делает
+`git reset --hard origin/master` и пересобирает стек (`.github/workflows/deploy.yml`).
+Разработка ведётся в `dev`; в `master` мержим только когда готовы выкатывать.
+
+Секреты репозитория (Settings → Secrets and variables → Actions):
+
+| Secret | Значение |
+|---|---|
+| `SERVER_HOST` | IP сервера |
+| `SERVER_USER` | пользователь SSH (`root`) |
+| `SSH_PRIVATE_KEY` | приватный deploy-ключ целиком (с BEGIN/END) |
+| `SERVER_PORT` | порт SSH (необяз., дефолт 22) |
+| `INSTALL_DIR` | каталог на сервере (необяз., дефолт `/opt/club_bot`) |
+
+Полезные команды на сервере (из каталога установки):
+```bash
+docker compose logs -f bot      # логи
+docker compose restart          # рестарт
+docker compose up -d --build    # пересборка после изменений
+```
 
 ## Миграции
 

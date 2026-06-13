@@ -10,6 +10,8 @@ venv/
 .env
 .env.local
 *.local
+.secrets/
+ssh_connect.txt
 
 # Логи
 *.log
