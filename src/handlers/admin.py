@@ -388,16 +388,22 @@ async def adm_durs(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
     rows = await repo.get_all_durations(pool)
-    lines = ["<b>ДЛИТЕЛЬНОСТИ</b>", "Нажми, чтобы включить/выключить:", ""]
+    lines = [
+        "<b>ДЛИТЕЛЬНОСТИ</b>",
+        "Слева — вкл/выкл, справа — удалить период.",
+        "",
+    ]
     b = InlineKeyboardBuilder()
     for r in rows:
         mark = "✓" if r["is_active"] else "✕"
         label = texts.period_phrase(r["months"], r["unit"])
         lines.append(f"{mark} {label}")
-        b.row(InlineKeyboardButton(
-            text=f"{mark} {label}",
-            callback_data=f"adm:dtoggle:{r['id']}",
-        ))
+        b.row(
+            InlineKeyboardButton(
+                text=f"{mark} {label}", callback_data=f"adm:dtoggle:{r['id']}"
+            ),
+            InlineKeyboardButton(text="Удалить", callback_data=f"adm:ddel:{r['id']}"),
+        )
     b.row(InlineKeyboardButton(text="Добавить длительность", callback_data="adm:dadd"))
     b.row(InlineKeyboardButton(text="Назад", callback_data="adm:menu"))
     await _show(cb, "\n".join(lines), b)
@@ -416,6 +422,39 @@ async def adm_dur_toggle(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) ->
             f"⚙️ Админ: длительность #{dur_id} "
             f"{cur['months']}{cur['unit']} active={not cur['is_active']}"
         )
+    await adm_durs(cb, pool)
+
+
+@router.callback_query(F.data.startswith("adm:ddel:"))
+async def adm_dur_del_confirm(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    dur_id = int(cb.data.rsplit(":", 1)[1])
+    d = await repo.get_duration(pool, dur_id)
+    if d is None:
+        return await adm_durs(cb, pool)
+    label = texts.period_phrase(d["months"], d["unit"])
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Да, удалить", callback_data=f"adm:ddelyes:{dur_id}"))
+    b.row(InlineKeyboardButton(text="Назад", callback_data="adm:durs"))
+    await _show(
+        cb,
+        f"Удалить длительность «{label}»?\n\n"
+        "Она исчезнет из списка и из выбора у пользователей. Заданные для неё цены "
+        "будут сброшены. Уже оформленные подписки не затрагиваются.",
+        b,
+    )
+
+
+@router.callback_query(F.data.startswith("adm:ddelyes:"))
+async def adm_dur_del_do(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    dur_id = int(cb.data.rsplit(":", 1)[1])
+    deleted = await repo.delete_duration(pool, dur_id)
+    if deleted:
+        await tariffs.invalidate(redis)
+        logger.info(f"⚙️ Админ удалил длительность #{dur_id}")
     await adm_durs(cb, pool)
 
 

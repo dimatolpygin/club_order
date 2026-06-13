@@ -209,6 +209,30 @@ async def set_duration_active(pool: asyncpg.Pool, duration_id: int, is_active: b
     return row is not None
 
 
+async def delete_duration(pool: asyncpg.Pool, duration_id: int) -> bool:
+    """Удаляет длительность вместе с заданными для этого периода ценами.
+
+    Подписки/платежи хранят снимок (months/unit) и FK на durations не имеют —
+    удаление длительности не затрагивает уже оформленные подписки. Заданные для
+    периода переопределения цены (tier_prices по всем ступеням) чистим, чтобы не
+    оставлять «осиротевшие» строки. Возвращает True, если строка была удалена.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            d = await conn.fetchrow(
+                "SELECT months, unit FROM durations WHERE id = $1", duration_id
+            )
+            if d is None:
+                return False
+            await conn.execute(
+                "DELETE FROM tier_prices WHERE months = $1 AND unit = $2",
+                d["months"],
+                d["unit"],
+            )
+            await conn.execute("DELETE FROM durations WHERE id = $1", duration_id)
+    return True
+
+
 # ── Подписки (subscriptions) ─────────────────────────────────────────────────
 async def add_subscription(
     pool: asyncpg.Pool,

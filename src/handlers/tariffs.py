@@ -60,6 +60,7 @@ async def show_tariffs(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
                 callback_data=f"buy:{d['id']}",
             )
         )
+    b.row(InlineKeyboardButton(text="Ввести промокод", callback_data=kb.NAV_PROMO))
     b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_START))
     await _edit(cb, texts.tariff_choose(fmt_price(monthly)), b.as_markup())
     logger.info(
