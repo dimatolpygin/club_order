@@ -10,6 +10,7 @@ sync_payment дёргается и фоновым поллером, и кноп�
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import asyncpg
@@ -23,6 +24,7 @@ from .. import repo, texts
 from ..config import settings
 from ..logger import logger
 from ..utils import fmt_price
+from . import promo as promo_service
 from . import tariffs
 from .receipt import build_receipt
 from .yookassa import YooKassaError, create_payment, get_payment, new_idempotence_key
@@ -164,6 +166,101 @@ async def start_renewal(
         "confirmation_url": confirmation_url,
         "amount": amount,
         "monthly": monthly,
+        "months": months,
+    }
+
+
+async def start_promo_payment(
+    pool: asyncpg.Pool,
+    redis: Redis,
+    *,
+    tg_id: int,
+    promo_id: int,
+    duration_id: int,
+    return_url: str,
+) -> tuple[str, dict | None]:
+    """Создаёт платёж по промокоду. Перепроверяет код (лимит/срок) перед оплатой.
+
+    Возвращает (статус, данные):
+      статус 'ok' + dict — платёж создан;
+      статус not_found/expired/exhausted/already_used — код больше неприменим;
+      статус 'no_tier' — нет активной ступени/длительности (мест нет).
+    """
+    promo = await repo.get_promo(pool, promo_id)
+    now = datetime.now(timezone.utc)
+    already = (
+        await repo.user_redeemed_promo(pool, promo_id, tg_id)
+        if promo is not None else False
+    )
+    status = promo_service.validate(promo, now=now, already_used=already)
+    if status != promo_service.VALID:
+        return status, None
+
+    duration = await repo.get_duration(pool, duration_id)
+    tier = await tariffs.get_current_tier(pool, redis)
+    if duration is None or tier is None:
+        return "no_tier", None
+
+    months: int = duration["months"]
+    unit: str = duration["unit"]
+    tier_monthly: Decimal = tier["monthly_price"]
+    period = await tariffs.period_price(pool, redis, tier, months, unit)
+    pricing = promo_service.compute_pricing(
+        promo, tier_monthly=tier_monthly, period_price=period, months=months
+    )
+    amount: Decimal = pricing["amount"]
+    if amount <= 0:
+        return "no_tier", None  # страховка: админ-валидация не даёт нулевую сумму
+
+    user = await repo.get_user(pool, tg_id)
+    description = (
+        f"Подписка в клуб «11:11» по промокоду {promo['code']} — "
+        f"{texts.period_phrase(months, unit)}"
+    )
+    receipt = build_receipt(user, description, amount)
+    idem = new_idempotence_key()
+    metadata = {
+        "tg_id": str(tg_id),
+        "tier_id": str(tier["id"]),
+        "months": str(months),
+        "unit": unit,
+        "duration_id": str(duration_id),
+        "promo_id": str(promo_id),
+    }
+    payment = await create_payment(
+        amount=amount,
+        description=description,
+        return_url=return_url,
+        metadata=metadata,
+        receipt=receipt,
+        idempotence_key=idem,
+    )
+    yk_id = payment["id"]
+    confirmation_url = (payment.get("confirmation") or {}).get("confirmation_url")
+    await repo.create_payment(
+        pool,
+        yookassa_payment_id=yk_id,
+        idempotence_key=idem,
+        tg_id=tg_id,
+        tier_id=tier["id"],
+        months=months,
+        fixed_price=pricing["fixed_price"],
+        amount=amount,
+        confirmation_url=confirmation_url,
+        status=payment.get("status", "pending"),
+        unit=unit,
+        promo_id=promo_id,
+    )
+    logger.info(
+        f"💳 Платёж по промокоду {promo['code']} создан: tg_id={tg_id}, "
+        f"спец {fmt_price(pricing['special_monthly'])} ₽/мес × "
+        f"{texts.period_phrase(months, unit)} = {fmt_price(amount)} ₽, yk_id={yk_id}"
+    )
+    return "ok", {
+        "payment_id": yk_id,
+        "confirmation_url": confirmation_url,
+        "amount": amount,
+        "special_monthly": pricing["special_monthly"],
         "months": months,
     }
 

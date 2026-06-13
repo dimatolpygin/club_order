@@ -115,6 +115,30 @@ def reminder_last_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
+def promo_enter_kb() -> InlineKeyboardMarkup:
+    """Экран ввода промокода (18): только «Назад» в меню."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_MENU))
+    return b.as_markup()
+
+
+def promo_not_found_kb() -> InlineKeyboardMarkup:
+    """Промокод не найден: ввести заново · выбрать тариф · поддержка."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Ввести заново", callback_data=NAV_PROMO))
+    b.row(InlineKeyboardButton(text="Выбрать тариф", callback_data=NAV_TARIFF))
+    b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
+    return b.as_markup()
+
+
+def promo_failed_kb() -> InlineKeyboardMarkup:
+    """Промокод истёк/исчерпан/уже использован: выбрать тариф · поддержка."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Выбрать тариф", callback_data=NAV_TARIFF))
+    b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
+    return b.as_markup()
+
+
 def to_menu_kb() -> InlineKeyboardMarkup:
     """Кнопка в главное меню (для заглушек и подтверждений)."""
     b = InlineKeyboardBuilder()

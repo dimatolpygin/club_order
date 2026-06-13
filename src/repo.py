@@ -283,14 +283,15 @@ async def create_payment(
     status: str = "pending",
     kind: str = "new",
     unit: str = "month",
+    promo_id: int | None = None,
 ) -> int:
     row = await pool.fetchrow(
         """
         INSERT INTO payments(
             yookassa_payment_id, idempotence_key, tg_id, tier_id, months, unit,
-            fixed_price, amount, confirmation_url, status, kind
+            fixed_price, amount, confirmation_url, status, kind, promo_id
         )
-        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING id
         """,
         yookassa_payment_id,
@@ -304,6 +305,7 @@ async def create_payment(
         confirmation_url,
         status,
         kind,
+        promo_id,
     )
     return row["id"]
 
@@ -392,12 +394,13 @@ async def activate_payment(
                     return active["id"], True
                 # активная подписка истекла до подтверждения — оформим новую от now
 
+            source = "promo" if pay["promo_id"] is not None else "payment"
             sub = await conn.fetchrow(
                 """
                 INSERT INTO subscriptions(
                     tg_id, tier_id, fixed_price, months, unit, end_date, source, status
                 )
-                VALUES($1, $2, $3, $4, $5, $6, 'payment', 'active')
+                VALUES($1, $2, $3, $4, $5, $6, $7, 'active')
                 RETURNING id
                 """,
                 pay["tg_id"],
@@ -406,6 +409,7 @@ async def activate_payment(
                 months,
                 unit,
                 add_period(now, months, unit),
+                source,
             )
             await conn.execute(
                 "UPDATE payments SET status = 'succeeded', subscription_id = $2, "
@@ -413,7 +417,100 @@ async def activate_payment(
                 pay["id"],
                 sub["id"],
             )
+            await _record_promo_redemption(conn, pay)
             return sub["id"], True
+
+
+async def _record_promo_redemption(conn, pay: asyncpg.Record) -> None:
+    """Внутри транзакции активации: фиксирует применение промокода и +1 к счётчику.
+
+    Уникальность (promo_id, tg_id) защищает от двойного учёта; инкремент
+    used_count делаем только когда запись действительно создана (этот платёж).
+    """
+    if pay["promo_id"] is None:
+        return
+    row = await conn.fetchrow(
+        """
+        INSERT INTO promo_redemptions(promo_id, tg_id, payment_id)
+        VALUES($1, $2, $3)
+        ON CONFLICT (promo_id, tg_id) DO NOTHING
+        RETURNING id
+        """,
+        pay["promo_id"],
+        pay["tg_id"],
+        pay["id"],
+    )
+    if row is not None:
+        await conn.execute(
+            "UPDATE promo_codes SET used_count = used_count + 1, updated_at = now() "
+            "WHERE id = $1",
+            pay["promo_id"],
+        )
+
+
+# ── Промокоды (promo_codes / promo_redemptions, этап 7) ───────────────────────
+async def create_promo(
+    pool: asyncpg.Pool,
+    *,
+    code: str,
+    kind: str,
+    value: Decimal | int | float,
+    max_activations: int | None,
+    expires_at: datetime | None,
+    fixes_price: bool,
+) -> int | None:
+    """Создаёт промокод. None — если код уже существует (нарушение уникальности)."""
+    try:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO promo_codes(
+                code, kind, value, max_activations, expires_at, fixes_price
+            )
+            VALUES($1, $2, $3, $4, $5, $6)
+            RETURNING id
+            """,
+            code,
+            kind,
+            Decimal(str(value)),
+            max_activations,
+            expires_at,
+            fixes_price,
+        )
+    except asyncpg.UniqueViolationError:
+        return None
+    return row["id"]
+
+
+async def get_promo_by_code(pool: asyncpg.Pool, code: str) -> asyncpg.Record | None:
+    return await pool.fetchrow("SELECT * FROM promo_codes WHERE code = $1", code)
+
+
+async def get_promo(pool: asyncpg.Pool, promo_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow("SELECT * FROM promo_codes WHERE id = $1", promo_id)
+
+
+async def get_all_promos(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    return await pool.fetch("SELECT * FROM promo_codes ORDER BY id DESC")
+
+
+async def set_promo_active(pool: asyncpg.Pool, promo_id: int, is_active: bool) -> bool:
+    row = await pool.fetchrow(
+        "UPDATE promo_codes SET is_active = $2, updated_at = now() "
+        "WHERE id = $1 RETURNING id",
+        promo_id,
+        is_active,
+    )
+    return row is not None
+
+
+async def user_redeemed_promo(pool: asyncpg.Pool, promo_id: int, tg_id: int) -> bool:
+    """Применял ли уже этот пользователь данный промокод (успешно)."""
+    row = await pool.fetchrow(
+        "SELECT 1 FROM promo_redemptions WHERE promo_id = $1 AND tg_id = $2",
+        promo_id,
+        tg_id,
+    )
+    return row is not None
 
 
 async def expire_due_subscriptions(pool: asyncpg.Pool) -> list[asyncpg.Record]:

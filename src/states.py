@@ -11,6 +11,11 @@ class SupportStates(StatesGroup):
     waiting_message = State()
 
 
+class PromoStates(StatesGroup):
+    # Ждём, пока пользователь пришлёт промокод сообщением.
+    waiting_code = State()
+
+
 class AdminStates(StatesGroup):
     # Пошаговый ввод в админ-панели. Контекст (id ступени и т.п.) — в data.
     tier_price = State()
@@ -24,3 +29,8 @@ class AdminStates(StatesGroup):
     member_unit = State()     # выбор единицы срока (data: member_tg_id, member_value)
     user_lookup = State()    # поиск участника по tg_id
     broadcast_text = State()  # текст рассылки (подтверждение — кнопкой)
+    # Создание промокода (тип и фиксация цены — кнопками, остальное вводом).
+    promo_code = State()      # ввод самого кода
+    promo_value = State()     # значение (ставка ₽/мес или процент), data: kind
+    promo_limit = State()     # лимит активаций (0 = безлимит)
+    promo_expiry = State()    # срок действия в днях (0 = бессрочно)

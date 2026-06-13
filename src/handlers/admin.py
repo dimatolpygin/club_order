@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from html import escape
 
@@ -23,7 +23,7 @@ from redis.asyncio import Redis
 from .. import repo, texts
 from ..config import settings
 from ..logger import logger
-from ..services import subscriptions, tariffs
+from ..services import promo as promo_service, subscriptions, tariffs
 from ..states import AdminStates
 from ..utils import add_period, fmt_price
 
@@ -44,6 +44,7 @@ def _main_kb() -> InlineKeyboardBuilder:
         InlineKeyboardButton(text="Добавить участника", callback_data="adm:maddstart"),
     )
     b.row(InlineKeyboardButton(text="Рассылка", callback_data="adm:bcaststart"))
+    b.row(InlineKeyboardButton(text="Промокоды", callback_data="adm:promos"))
     b.row(InlineKeyboardButton(text="Статистика", callback_data="adm:stats"))
     b.row(InlineKeyboardButton(text="Закрыть", callback_data="adm:close"))
     return b
@@ -720,6 +721,194 @@ async def adm_bcast_go(
         reply_markup=_main_kb().as_markup(),
     )
     logger.info(f"📣 Рассылка: отправлено {sent}, заблок. {blocked}, ошибок {failed}")
+
+
+# ── Промокоды ────────────────────────────────────────────────────────────────
+def _promo_desc(p) -> str:
+    """Краткое описание условий промокода для списка."""
+    if p["kind"] == promo_service.KIND_PERCENT:
+        cond = f"скидка {fmt_price(p['value'])}%"
+    else:
+        cond = f"спец {fmt_price(p['value'])} ₽/мес"
+    limit = "∞" if p["max_activations"] is None else str(p["max_activations"])
+    expiry = "бессрочно" if p["expires_at"] is None else f"{p['expires_at']:%d.%m.%Y}"
+    fix = "фикс" if p["fixes_price"] else "разово"
+    status = "вкл" if p["is_active"] else "выкл"
+    return (
+        f"{cond} · использовано {p['used_count']}/{limit} · до {expiry} · "
+        f"{fix} · {status}"
+    )
+
+
+async def _promos_menu(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    promos = await repo.get_all_promos(pool)
+    lines = ["<b>ПРОМОКОДЫ</b>", "Нажми на код, чтобы включить/выключить.", ""]
+    b = InlineKeyboardBuilder()
+    if not promos:
+        lines.append("<i>Пока нет ни одного промокода.</i>")
+    for p in promos:
+        lines.append(f"#{p['id']} <code>{escape(p['code'])}</code> — {_promo_desc(p)}")
+        mark = "✓" if p["is_active"] else "✕"
+        b.row(InlineKeyboardButton(
+            text=f"{mark} {p['code']}", callback_data=f"adm:ptoggle:{p['id']}"
+        ))
+    b.row(InlineKeyboardButton(text="Создать промокод", callback_data="adm:promonew"))
+    b.row(InlineKeyboardButton(text="Назад", callback_data="adm:menu"))
+    await _show(cb, "\n".join(lines), b)
+
+
+@router.callback_query(F.data == "adm:promos")
+async def adm_promos(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    await _promos_menu(cb, pool)
+
+
+@router.callback_query(F.data.startswith("adm:ptoggle:"))
+async def adm_promo_toggle(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    p = await repo.get_promo(pool, promo_id)
+    if p is not None:
+        await repo.set_promo_active(pool, promo_id, not p["is_active"])
+        logger.info(f"⚙️ Админ: промокод #{promo_id} active={not p['is_active']}")
+    await _promos_menu(cb, pool)
+
+
+@router.callback_query(F.data == "adm:promonew")
+async def adm_promo_new(cb: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    await state.set_state(AdminStates.promo_code)
+    await _show(cb, "Введите промокод (буквы/цифры, например LAUNCH11):", _cancel_kb())
+
+
+@router.message(AdminStates.promo_code)
+async def adm_promo_code(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    code = promo_service.normalize_code(message.text)
+    if not code or " " in code or len(code) > 32:
+        return await message.answer("Код пустой или некорректный. Введите ещё раз (без пробелов, до 32 символов):")
+    if await repo.get_promo_by_code(pool, code) is not None:
+        return await message.answer("Такой код уже существует. Введите другой:")
+    await state.update_data(promo_code=code)
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Спец-цена ₽/мес", callback_data="adm:pkind:fixed_price"))
+    b.row(InlineKeyboardButton(text="Скидка %", callback_data="adm:pkind:percent"))
+    b.row(InlineKeyboardButton(text="Отмена", callback_data="adm:menu"))
+    await message.answer(f"Код: <code>{escape(code)}</code>\n\nВыберите тип промокода:", reply_markup=b.as_markup())
+
+
+@router.callback_query(AdminStates.promo_code, F.data.startswith("adm:pkind:"))
+async def adm_promo_kind(cb: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    kind = cb.data.rsplit(":", 1)[1]
+    await state.update_data(promo_kind=kind)
+    await state.set_state(AdminStates.promo_value)
+    prompt = (
+        "Введите процент скидки (1–99):"
+        if kind == promo_service.KIND_PERCENT
+        else "Введите спец-цену в рублях за месяц (например 555):"
+    )
+    await _show(cb, prompt, _cancel_kb())
+
+
+@router.message(AdminStates.promo_value)
+async def adm_promo_value(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    kind = data["promo_kind"]
+    try:
+        value = Decimal((message.text or "").replace(",", ".").strip())
+    except (InvalidOperation, ValueError):
+        return await message.answer("Не похоже на число. Введите ещё раз:")
+    if kind == promo_service.KIND_PERCENT:
+        if not (0 < value < 100):
+            return await message.answer("Процент должен быть от 1 до 99. Введите ещё раз:")
+    elif value <= 0:
+        return await message.answer("Цена должна быть больше нуля. Введите ещё раз:")
+    await state.update_data(promo_value=str(value))
+    await state.set_state(AdminStates.promo_limit)
+    await message.answer(
+        "Лимит активаций (сколько раз можно применить; 0 — без лимита):",
+        reply_markup=_cancel_kb().as_markup(),
+    )
+
+
+@router.message(AdminStates.promo_limit)
+async def adm_promo_limit(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        return await message.answer("Введите целое число (0 — без лимита):")
+    await state.update_data(promo_limit=int(raw))
+    await state.set_state(AdminStates.promo_expiry)
+    await message.answer(
+        "Срок действия в днях (0 — бессрочно):",
+        reply_markup=_cancel_kb().as_markup(),
+    )
+
+
+@router.message(AdminStates.promo_expiry)
+async def adm_promo_expiry(message: Message, state: FSMContext) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        return await message.answer("Введите целое число дней (0 — бессрочно):")
+    await state.update_data(promo_expiry_days=int(raw))
+    # Единицу «фиксации цены» спрашиваем кнопкой; состояние держим, чтобы не ловить
+    # лишние сообщения, данные сохранены в FSM до создания.
+    b = InlineKeyboardBuilder()
+    b.row(
+        InlineKeyboardButton(text="Фиксировать цену", callback_data="adm:pfix:1"),
+        InlineKeyboardButton(text="Разовая скидка", callback_data="adm:pfix:0"),
+    )
+    b.row(InlineKeyboardButton(text="Отмена", callback_data="adm:menu"))
+    await message.answer(
+        "Фиксировать ли спец-цену за пользователем для продлений?",
+        reply_markup=b.as_markup(),
+    )
+
+
+@router.callback_query(AdminStates.promo_expiry, F.data.startswith("adm:pfix:"))
+async def adm_promo_create(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    fixes = cb.data.rsplit(":", 1)[1] == "1"
+    data = await state.get_data()
+    limit = data["promo_limit"]
+    days = data["promo_expiry_days"]
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(days=days) if days > 0 else None
+    )
+    promo_id = await repo.create_promo(
+        pool,
+        code=data["promo_code"],
+        kind=data["promo_kind"],
+        value=Decimal(data["promo_value"]),
+        max_activations=None if limit == 0 else limit,
+        expires_at=expires_at,
+        fixes_price=fixes,
+    )
+    await state.clear()
+    if promo_id is None:
+        return await _show(cb, "Не удалось создать: такой код уже существует.", _main_kb())
+    p = await repo.get_promo(pool, promo_id)
+    await _show(
+        cb,
+        f"Промокод <code>{escape(p['code'])}</code> создан.\n\n{_promo_desc(p)}",
+        _main_kb(),
+    )
+    logger.info(
+        f"⚙️ Админ создал промокод #{promo_id} {p['code']} "
+        f"({p['kind']}={p['value']}, лимит={p['max_activations']}, фикс={fixes})"
+    )
 
 
 # ── Статистика ───────────────────────────────────────────────────────────────
