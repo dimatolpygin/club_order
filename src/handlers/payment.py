@@ -116,6 +116,70 @@ async def pay_check(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
         await cb.answer(texts.PAY_STILL_PENDING, show_alert=True)
 
 
+# ── Продление подписки (этап 5) ──────────────────────────────────────────────
+def _renew_kb(durations, monthly) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for d in durations:
+        months = d["months"]
+        total = monthly * months
+        b.row(InlineKeyboardButton(
+            text=f"{months} мес — {fmt_price(total)} ₽",
+            callback_data=f"renew:{d['id']}",
+        ))
+    b.row(InlineKeyboardButton(text="Моя подписка", callback_data=kb.NAV_MYSUB))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
+    return b.as_markup()
+
+
+@router.callback_query(F.data == kb.NAV_RENEW)
+async def nav_renew(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    sub = await repo.get_active_subscription(pool, cb.from_user.id)
+    if sub is None:
+        # Продлевать нечего — показываем «нет активной подписки» (новая по актуальной цене).
+        await render_my_subscription(cb, pool)
+        return
+
+    await repo.set_fsm_state(pool, cb.from_user.id, "screen:renew")
+    durations = await repo.get_active_durations(pool)
+    monthly = sub["fixed_price"]
+    await _edit(cb, texts.renew_choose(fmt_price(monthly)), _renew_kb(durations, monthly))
+    logger.info(
+        f"🤖 Бот → @{cb.from_user.username or '—'}: продление, ставка "
+        f"{fmt_price(monthly)} ₽/мес, {len(durations)} длит."
+    )
+
+
+@router.callback_query(F.data.startswith("renew:"))
+async def renew_create(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
+    duration_id = int(cb.data.split(":", 1)[1])
+    await cb.answer("Создаю платёж...")
+    try:
+        result = await payments.start_renewal(
+            pool,
+            tg_id=cb.from_user.id,
+            duration_id=duration_id,
+            return_url=await _return_url(bot),
+        )
+    except YooKassaError:
+        await _edit(cb, texts.PAY_CREATE_FAILED, kb.to_menu_kb())
+        return
+    if result is None:
+        # Активная подписка истекла, пока выбирали срок — оформляем заново.
+        await render_my_subscription(cb, pool)
+        return
+
+    await repo.set_fsm_state(pool, cb.from_user.id, "screen:pay:pending")
+    await _edit(
+        cb,
+        texts.pay_created(fmt_price(result["amount"])),
+        _pay_kb(result["confirmation_url"], result["payment_id"]).as_markup(),
+    )
+    logger.info(
+        f"🤖 Бот → @{cb.from_user.username or '—'}: ссылка на продление "
+        f"{fmt_price(result['amount'])} ₽ (yk_id={result['payment_id']})"
+    )
+
+
 # ── Моя подписка ─────────────────────────────────────────────────────────────
 async def _my_subscription_view(
     pool: asyncpg.Pool, user_id: int

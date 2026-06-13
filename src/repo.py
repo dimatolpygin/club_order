@@ -1,10 +1,12 @@
 """Слой доступа к данным. Все таблицы — в схеме club_bot (search_path задан в db.py)."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import asyncpg
+
+from .utils import add_months
 
 
 async def upsert_user(
@@ -266,14 +268,15 @@ async def create_payment(
     amount: Decimal | int | float,
     confirmation_url: str | None,
     status: str = "pending",
+    kind: str = "new",
 ) -> int:
     row = await pool.fetchrow(
         """
         INSERT INTO payments(
             yookassa_payment_id, idempotence_key, tg_id, tier_id, months,
-            fixed_price, amount, confirmation_url, status
+            fixed_price, amount, confirmation_url, status, kind
         )
-        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id
         """,
         yookassa_payment_id,
@@ -285,6 +288,7 @@ async def create_payment(
         Decimal(str(amount)),
         confirmation_url,
         status,
+        kind,
     )
     return row["id"]
 
@@ -311,19 +315,26 @@ async def mark_payment_canceled(pool: asyncpg.Pool, yk_id: str) -> None:
 
 
 async def activate_payment(
-    pool: asyncpg.Pool, yk_id: str, end_date: datetime
+    pool: asyncpg.Pool, yk_id: str
 ) -> tuple[int | None, bool]:
-    """Атомарно активирует подписку по успешному платежу. Идемпотентно.
+    """Атомарно активирует/продлевает подписку по успешному платежу. Идемпотентно.
 
     Берёт строку платежа под блокировку (FOR UPDATE). Если подписка уже создана
     (subscription_id заполнен) — ничего не делает: повторный вызов (поллер + кнопка
     «Проверить» одновременно, повторная оплата того же платежа) НЕ создаёт дубль.
-    Иначе создаёт подписку, помечает платёж succeeded и связывает их.
+
+    Иначе по kind платежа:
+      'new'     — создаёт подписку (end_date = now + months);
+      'renewal' — продлевает АКТИВНУЮ подписку юзера (end_date += months, та же
+                  строка, зафиксированная цена сохраняется). Если активной нет
+                  (истекла между оплатой и подтверждением) — fallback: создаёт
+                  новую от now по оплаченной ставке (деньги уже приняты).
 
     Возвращает (subscription_id, created):
-      created=True  — подписка создана этим вызовом (уведомить пользователя);
+      created=True  — подписка создана/продлена этим вызовом (уведомить пользователя);
       created=False — платёж не найден (id=None) либо уже был активирован ранее.
     """
+    now = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
         async with conn.transaction():
             pay = await conn.fetchrow(
@@ -334,6 +345,36 @@ async def activate_payment(
                 return None, False
             if pay["subscription_id"] is not None:
                 return pay["subscription_id"], False  # уже активирован — без дубля
+
+            months = pay["months"]
+
+            if pay["kind"] == "renewal":
+                active = await conn.fetchrow(
+                    """
+                    SELECT * FROM subscriptions
+                    WHERE tg_id = $1 AND status = 'active' AND end_date > now()
+                    ORDER BY end_date DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
+                    pay["tg_id"],
+                )
+                if active is not None:
+                    new_end = add_months(active["end_date"], months)
+                    await conn.execute(
+                        "UPDATE subscriptions SET end_date = $2, updated_at = now() "
+                        "WHERE id = $1",
+                        active["id"],
+                        new_end,
+                    )
+                    await conn.execute(
+                        "UPDATE payments SET status = 'succeeded', subscription_id = $2, "
+                        "updated_at = now() WHERE id = $1",
+                        pay["id"],
+                        active["id"],
+                    )
+                    return active["id"], True
+                # активная подписка истекла до подтверждения — оформим новую от now
 
             sub = await conn.fetchrow(
                 """
@@ -346,8 +387,8 @@ async def activate_payment(
                 pay["tg_id"],
                 pay["tier_id"],
                 pay["fixed_price"],
-                pay["months"],
-                end_date,
+                months,
+                add_months(now, months),
             )
             await conn.execute(
                 "UPDATE payments SET status = 'succeeded', subscription_id = $2, "
@@ -356,6 +397,24 @@ async def activate_payment(
                 sub["id"],
             )
             return sub["id"], True
+
+
+async def expire_due_subscriptions(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Помечает истёкшие активные подписки 'expired'. Возвращает строки (id, tg_id).
+
+    Вызывается фоновой проверкой окончаний: по возвращённым юзерам бот кикает из
+    группы и шлёт уведомление. Перевод в 'expired' освобождает место (счётчик
+    активных падает) и сбрасывает зафиксированную цену — новая подписка оформится
+    по актуальной ступени.
+    """
+    return await pool.fetch(
+        """
+        UPDATE subscriptions
+        SET status = 'expired', updated_at = now()
+        WHERE status = 'active' AND end_date <= now()
+        RETURNING id, tg_id
+        """
+    )
 
 
 async def cancel_active_subscriptions(pool: asyncpg.Pool, tg_id: int) -> int:

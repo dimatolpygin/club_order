@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     yookassa_return_url: str = ""
     # Как часто опрашивать pending-платежи (минуты).
     payment_poll_interval_min: int = 1
+    # Как часто проверять окончания подписок (минуты) — кик из группы + уведомление.
+    expiry_check_interval_min: int = 30
     # Чек 54-ФЗ: ВРЕМЕННАЯ заглушка email покупателя.
     # АРХИТЕКТУРА: реальный email берётся из users.email (см. services.receipt),
     # эта заглушка — fallback, пока сбор email не включён. Меняется одной настройкой.

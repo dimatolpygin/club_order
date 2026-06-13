@@ -10,7 +10,6 @@ sync_payment дёргается и фоновым поллером, и кноп�
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from decimal import Decimal
 
 import asyncpg
@@ -23,7 +22,7 @@ from .. import keyboards as kb
 from .. import repo, texts
 from ..config import settings
 from ..logger import logger
-from ..utils import add_months, fmt_price
+from ..utils import fmt_price
 from . import tariffs
 from .receipt import build_receipt
 from .yookassa import YooKassaError, create_payment, get_payment, new_idempotence_key
@@ -94,6 +93,75 @@ async def start_payment(
     }
 
 
+async def start_renewal(
+    pool: asyncpg.Pool,
+    *,
+    tg_id: int,
+    duration_id: int,
+    return_url: str,
+) -> dict | None:
+    """Создаёт платёж-продление по ЗАФИКСИРОВАННОЙ ставке активной подписки.
+
+    В отличие от первичной покупки, цена считается строго как
+    зафиксированная_ставка × месяцы (матрица tier_prices — это «текущее»
+    ценообразование, а продление сохраняет ставку). tier_id и ставка берутся из
+    активной подписки. None — если активной подписки/длительности нет.
+    """
+    sub = await repo.get_active_subscription(pool, tg_id)
+    duration = await repo.get_duration(pool, duration_id)
+    if sub is None or duration is None:
+        return None
+
+    months: int = duration["months"]
+    monthly: Decimal = sub["fixed_price"]
+    amount = monthly * months
+    user = await repo.get_user(pool, tg_id)
+    description = f"Продление подписки в клуб «11:11» — {months} мес"
+    receipt = build_receipt(user, description, amount)
+    idem = new_idempotence_key()
+    metadata = {
+        "tg_id": str(tg_id),
+        "tier_id": str(sub["tier_id"]) if sub["tier_id"] is not None else "",
+        "months": str(months),
+        "duration_id": str(duration_id),
+        "kind": "renewal",
+    }
+    payment = await create_payment(
+        amount=amount,
+        description=description,
+        return_url=return_url,
+        metadata=metadata,
+        receipt=receipt,
+        idempotence_key=idem,
+    )
+    yk_id = payment["id"]
+    confirmation_url = (payment.get("confirmation") or {}).get("confirmation_url")
+    await repo.create_payment(
+        pool,
+        yookassa_payment_id=yk_id,
+        idempotence_key=idem,
+        tg_id=tg_id,
+        tier_id=sub["tier_id"],
+        months=months,
+        fixed_price=monthly,
+        amount=amount,
+        confirmation_url=confirmation_url,
+        status=payment.get("status", "pending"),
+        kind="renewal",
+    )
+    logger.info(
+        f"💳 Продление создано: tg_id={tg_id}, {fmt_price(monthly)} ₽/мес × {months} мес "
+        f"= {fmt_price(amount)} ₽, yk_id={yk_id}"
+    )
+    return {
+        "payment_id": yk_id,
+        "confirmation_url": confirmation_url,
+        "amount": amount,
+        "monthly": monthly,
+        "months": months,
+    }
+
+
 async def sync_payment(
     pool: asyncpg.Pool, bot: Bot, payment: asyncpg.Record
 ) -> tuple[str, asyncpg.Record | None]:
@@ -118,8 +186,7 @@ async def sync_payment(
 
     status = data.get("status")
     if status == "succeeded":
-        end_date = add_months(datetime.now(timezone.utc), payment["months"])
-        sub_id, created = await repo.activate_payment(pool, yk_id, end_date)
+        sub_id, created = await repo.activate_payment(pool, yk_id)
         if sub_id is None:
             return "pending", None
         sub = await pool.fetchrow("SELECT * FROM subscriptions WHERE id = $1", sub_id)

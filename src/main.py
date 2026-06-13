@@ -17,7 +17,7 @@ from .db import close_pool, init_pool
 from .handlers import get_main_router
 from .logger import setup_logging
 from .middlewares import LoggingMiddleware
-from .services import payments
+from .services import payments, subscriptions
 
 
 async def main() -> None:
@@ -53,6 +53,16 @@ async def main() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # Фоновая проверка окончаний подписок: статус expired + кик из группы + уведомление.
+    scheduler.add_job(
+        subscriptions.run_expiry_check,
+        "interval",
+        minutes=settings.expiry_check_interval_min,
+        args=[pool, bot],
+        id="expire_subscriptions",
+        max_instances=1,
+        coalesce=True,
+    )
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
@@ -68,7 +78,8 @@ async def main() -> None:
         allowed = dp.resolve_used_update_types()
         log.info(
             f"✅ Бот @{me.username} запущен (polling); поллер платежей каждые "
-            f"{settings.payment_poll_interval_min} мин; апдейты: {allowed}"
+            f"{settings.payment_poll_interval_min} мин; проверка окончаний каждые "
+            f"{settings.expiry_check_interval_min} мин; апдейты: {allowed}"
         )
         await dp.start_polling(bot, allowed_updates=allowed)
     finally:

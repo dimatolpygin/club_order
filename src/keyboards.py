@@ -82,6 +82,14 @@ def back_to_support_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
+def sub_ended_kb() -> InlineKeyboardMarkup:
+    """Клавиатура уведомления «подписка закончилась» (экран 17)."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Вернуться в клуб", callback_data=NAV_TARIFF))
+    b.row(InlineKeyboardButton(text="Ввести промокод", callback_data=NAV_PROMO))
+    return b.as_markup()
+
+
 def to_menu_kb() -> InlineKeyboardMarkup:
     """Кнопка в главное меню (для заглушек и подтверждений)."""
     b = InlineKeyboardBuilder()
