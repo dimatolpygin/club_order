@@ -40,10 +40,6 @@ class Settings(BaseSettings):
     # Как часто проверять окончания подписок (минуты) — кик из группы + уведомление.
     # Ставь 1 для проверки каждую минуту (тест), 60 — раз в час и т.д.
     expiry_check_interval_min: int = 30
-    # Единица длительности подписки: "months" (прод) или "minutes" (ТЕСТ окончаний).
-    # В режиме minutes «1/3/6/12» считаются минутами и в end_date, и в подписях кнопок —
-    # подписка истекает за минуты, чтобы вживую увидеть авто-кик из группы.
-    subscription_unit: str = "months"
     # Чек 54-ФЗ: ВРЕМЕННАЯ заглушка email покупателя.
     # АРХИТЕКТУРА: реальный email берётся из users.email (см. services.receipt),
     # эта заглушка — fallback, пока сбор email не включён. Меняется одной настройкой.
@@ -58,14 +54,6 @@ class Settings(BaseSettings):
         # Защита от инъекции: имя схемы попадает в DDL/search_path напрямую.
         if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", v):
             raise ValueError(f"Недопустимое имя схемы: {v}")
-        return v
-
-    @field_validator("subscription_unit")
-    @classmethod
-    def _validate_unit(cls, v: str) -> str:
-        v = v.strip().lower()
-        if v not in ("months", "minutes"):
-            raise ValueError("subscription_unit должен быть 'months' или 'minutes'")
         return v
 
     @property

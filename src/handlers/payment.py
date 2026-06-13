@@ -120,10 +120,9 @@ async def pay_check(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
 def _renew_kb(durations, monthly) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for d in durations:
-        months = d["months"]
-        total = monthly * months
+        total = monthly * d["months"]
         b.row(InlineKeyboardButton(
-            text=f"{months} {texts.period_short()} — {fmt_price(total)} ₽",
+            text=f"{d['months']} {texts.period_short(d['unit'])} — {fmt_price(total)} ₽",
             callback_data=f"renew:{d['id']}",
         ))
     b.row(InlineKeyboardButton(text="Моя подписка", callback_data=kb.NAV_MYSUB))
@@ -206,7 +205,7 @@ async def _my_subscription_view(
         fmt_price(sub["fixed_price"]),
         sub["start_date"],
         sub["end_date"],
-        texts.remaining_phrase(sub["end_date"], datetime.now(timezone.utc)),
+        texts.remaining_phrase(sub["end_date"], datetime.now(timezone.utc), sub["unit"]),
         user_id,
     )
     return text, b.as_markup(), True

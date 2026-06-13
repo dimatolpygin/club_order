@@ -43,19 +43,21 @@ async def start_payment(
         return None
 
     months: int = duration["months"]
+    unit: str = duration["unit"]
     monthly: Decimal = tier["monthly_price"]
     # Сумма к оплате — цена за период (матрица ступень×период), может отличаться
-    # от ставка×месяцы. Фиксируем за пользователем именно МЕСЯЧНУЮ ставку (monthly)
+    # от ставка×значение. Фиксируем за пользователем именно МЕСЯЧНУЮ ставку (monthly)
     # — по ней пойдут продления; итоговая сумма покупки берётся из матрицы.
-    amount = await tariffs.period_price(pool, redis, tier, months)
+    amount = await tariffs.period_price(pool, redis, tier, months, unit)
     user = await repo.get_user(pool, tg_id)
-    description = f"Подписка в клуб «11:11» — {months} мес"
+    description = f"Подписка в клуб «11:11» — {texts.period_phrase(months, unit)}"
     receipt = build_receipt(user, description, amount)
     idem = new_idempotence_key()
     metadata = {
         "tg_id": str(tg_id),
         "tier_id": str(tier["id"]),
         "months": str(months),
+        "unit": unit,
         "duration_id": str(duration_id),
     }
     payment = await create_payment(
@@ -79,10 +81,11 @@ async def start_payment(
         amount=amount,
         confirmation_url=confirmation_url,
         status=payment.get("status", "pending"),
+        unit=unit,
     )
     logger.info(
-        f"💳 Платёж создан: tg_id={tg_id}, {fmt_price(monthly)} ₽/мес × {months} мес "
-        f"= {fmt_price(amount)} ₽, yk_id={yk_id}"
+        f"💳 Платёж создан: tg_id={tg_id}, {fmt_price(monthly)} ₽/мес × "
+        f"{texts.period_phrase(months, unit)} = {fmt_price(amount)} ₽, yk_id={yk_id}"
     )
     return {
         "payment_id": yk_id,
@@ -113,16 +116,18 @@ async def start_renewal(
         return None
 
     months: int = duration["months"]
+    unit: str = duration["unit"]
     monthly: Decimal = sub["fixed_price"]
     amount = monthly * months
     user = await repo.get_user(pool, tg_id)
-    description = f"Продление подписки в клуб «11:11» — {months} мес"
+    description = f"Продление подписки в клуб «11:11» — {texts.period_phrase(months, unit)}"
     receipt = build_receipt(user, description, amount)
     idem = new_idempotence_key()
     metadata = {
         "tg_id": str(tg_id),
         "tier_id": str(sub["tier_id"]) if sub["tier_id"] is not None else "",
         "months": str(months),
+        "unit": unit,
         "duration_id": str(duration_id),
         "kind": "renewal",
     }
@@ -148,10 +153,11 @@ async def start_renewal(
         confirmation_url=confirmation_url,
         status=payment.get("status", "pending"),
         kind="renewal",
+        unit=unit,
     )
     logger.info(
-        f"💳 Продление создано: tg_id={tg_id}, {fmt_price(monthly)} ₽/мес × {months} мес "
-        f"= {fmt_price(amount)} ₽, yk_id={yk_id}"
+        f"💳 Продление создано: tg_id={tg_id}, {fmt_price(monthly)} ₽/мес × "
+        f"{texts.period_phrase(months, unit)} = {fmt_price(amount)} ₽, yk_id={yk_id}"
     )
     return {
         "payment_id": yk_id,

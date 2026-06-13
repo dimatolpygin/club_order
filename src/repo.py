@@ -6,7 +6,6 @@ from decimal import Decimal
 
 import asyncpg
 
-from .config import settings
 from .utils import add_period
 
 
@@ -101,37 +100,44 @@ async def update_tier(pool: asyncpg.Pool, tier_id: int, **fields) -> bool:
 
 # ── Цены за период внутри ступени (tier_prices) ──────────────────────────────
 async def get_all_tier_prices(pool: asyncpg.Pool) -> list[asyncpg.Record]:
-    return await pool.fetch("SELECT tier_id, months, price FROM tier_prices")
+    return await pool.fetch("SELECT tier_id, months, unit, price FROM tier_prices")
 
 
-async def get_tier_prices(pool: asyncpg.Pool, tier_id: int) -> dict[int, "Decimal"]:
-    """Переопределения цены {месяцы: цена} для одной ступени."""
+async def get_tier_prices(pool: asyncpg.Pool, tier_id: int) -> dict[tuple[int, str], "Decimal"]:
+    """Переопределения цены {(значение, единица): цена} для одной ступени."""
     rows = await pool.fetch(
-        "SELECT months, price FROM tier_prices WHERE tier_id = $1", tier_id
+        "SELECT months, unit, price FROM tier_prices WHERE tier_id = $1", tier_id
     )
-    return {r["months"]: r["price"] for r in rows}
+    return {(r["months"], r["unit"]): r["price"] for r in rows}
 
 
 async def set_tier_price(
-    pool: asyncpg.Pool, tier_id: int, months: int, price: Decimal | int | float
+    pool: asyncpg.Pool, tier_id: int, value: int, unit: str,
+    price: Decimal | int | float,
 ) -> None:
     await pool.execute(
         """
-        INSERT INTO tier_prices(tier_id, months, price)
-        VALUES($1, $2, $3)
-        ON CONFLICT (tier_id, months) DO UPDATE
+        INSERT INTO tier_prices(tier_id, months, unit, price)
+        VALUES($1, $2, $3, $4)
+        ON CONFLICT (tier_id, months, unit) DO UPDATE
             SET price = EXCLUDED.price, updated_at = now()
         """,
         tier_id,
-        months,
+        value,
+        unit,
         Decimal(str(price)),
     )
 
 
-async def delete_tier_price(pool: asyncpg.Pool, tier_id: int, months: int) -> None:
-    """Сброс переопределения — период снова считается как ставка×месяцы."""
+async def delete_tier_price(
+    pool: asyncpg.Pool, tier_id: int, value: int, unit: str
+) -> None:
+    """Сброс переопределения — период снова считается как ставка×значение."""
     await pool.execute(
-        "DELETE FROM tier_prices WHERE tier_id = $1 AND months = $2", tier_id, months
+        "DELETE FROM tier_prices WHERE tier_id = $1 AND months = $2 AND unit = $3",
+        tier_id,
+        value,
+        unit,
     )
 
 
@@ -178,22 +184,26 @@ async def get_duration(pool: asyncpg.Pool, duration_id: int) -> asyncpg.Record |
     return await pool.fetchrow("SELECT * FROM durations WHERE id = $1", duration_id)
 
 
-async def upsert_duration(pool: asyncpg.Pool, months: int, is_active: bool = True) -> None:
+async def upsert_duration(
+    pool: asyncpg.Pool, value: int, unit: str = "month", is_active: bool = True
+) -> None:
+    """Добавляет/включает длительность (значение + единица). months хранит значение."""
     await pool.execute(
         """
-        INSERT INTO durations(months, sort_order, is_active)
-        VALUES($1, $1, $2)
-        ON CONFLICT (months) DO UPDATE SET is_active = EXCLUDED.is_active
+        INSERT INTO durations(months, unit, sort_order, is_active)
+        VALUES($1, $2, $1, $3)
+        ON CONFLICT (months, unit) DO UPDATE SET is_active = EXCLUDED.is_active
         """,
-        months,
+        value,
+        unit,
         is_active,
     )
 
 
-async def set_duration_active(pool: asyncpg.Pool, months: int, is_active: bool) -> bool:
+async def set_duration_active(pool: asyncpg.Pool, duration_id: int, is_active: bool) -> bool:
     row = await pool.fetchrow(
-        "UPDATE durations SET is_active = $2 WHERE months = $1 RETURNING id",
-        months,
+        "UPDATE durations SET is_active = $2 WHERE id = $1 RETURNING id",
+        duration_id,
         is_active,
     )
     return row is not None
@@ -209,17 +219,19 @@ async def add_subscription(
     end_date: datetime,
     source: str = "payment",
     status: str = "active",
+    unit: str = "month",
 ) -> int:
     row = await pool.fetchrow(
         """
-        INSERT INTO subscriptions(tg_id, tier_id, fixed_price, months, end_date, source, status)
-        VALUES($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO subscriptions(tg_id, tier_id, fixed_price, months, unit, end_date, source, status)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id
         """,
         tg_id,
         tier_id,
         Decimal(str(fixed_price)),
         months,
+        unit,
         end_date,
         source,
         status,
@@ -270,14 +282,15 @@ async def create_payment(
     confirmation_url: str | None,
     status: str = "pending",
     kind: str = "new",
+    unit: str = "month",
 ) -> int:
     row = await pool.fetchrow(
         """
         INSERT INTO payments(
-            yookassa_payment_id, idempotence_key, tg_id, tier_id, months,
+            yookassa_payment_id, idempotence_key, tg_id, tier_id, months, unit,
             fixed_price, amount, confirmation_url, status, kind
         )
-        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id
         """,
         yookassa_payment_id,
@@ -285,6 +298,7 @@ async def create_payment(
         tg_id,
         tier_id,
         months,
+        unit,
         Decimal(str(fixed_price)),
         Decimal(str(amount)),
         confirmation_url,
@@ -348,6 +362,7 @@ async def activate_payment(
                 return pay["subscription_id"], False  # уже активирован — без дубля
 
             months = pay["months"]
+            unit = pay["unit"]
 
             if pay["kind"] == "renewal":
                 active = await conn.fetchrow(
@@ -361,9 +376,7 @@ async def activate_payment(
                     pay["tg_id"],
                 )
                 if active is not None:
-                    new_end = add_period(
-                        active["end_date"], months, settings.subscription_unit
-                    )
+                    new_end = add_period(active["end_date"], months, unit)
                     await conn.execute(
                         "UPDATE subscriptions SET end_date = $2, updated_at = now() "
                         "WHERE id = $1",
@@ -382,16 +395,17 @@ async def activate_payment(
             sub = await conn.fetchrow(
                 """
                 INSERT INTO subscriptions(
-                    tg_id, tier_id, fixed_price, months, end_date, source, status
+                    tg_id, tier_id, fixed_price, months, unit, end_date, source, status
                 )
-                VALUES($1, $2, $3, $4, $5, 'payment', 'active')
+                VALUES($1, $2, $3, $4, $5, $6, 'payment', 'active')
                 RETURNING id
                 """,
                 pay["tg_id"],
                 pay["tier_id"],
                 pay["fixed_price"],
                 months,
-                add_period(now, months, settings.subscription_unit),
+                unit,
+                add_period(now, months, unit),
             )
             await conn.execute(
                 "UPDATE payments SET status = 'succeeded', subscription_id = $2, "

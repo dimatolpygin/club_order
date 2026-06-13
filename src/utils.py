@@ -16,11 +16,14 @@ def add_months(dt: datetime, months: int) -> datetime:
     return dt.replace(year=year, month=month, day=day)
 
 
-def add_period(dt: datetime, n: int, unit: str = "months") -> datetime:
-    """Прибавляет N единиц длительности. unit='minutes' (тест окончаний) → минуты,
-    иначе — месяцы. Единица берётся из settings.subscription_unit."""
-    if unit == "minutes":
+def add_period(dt: datetime, n: int, unit: str = "month") -> datetime:
+    """Прибавляет N единиц длительности к дате. unit: minute/hour/day/month."""
+    if unit == "minute":
         return dt + timedelta(minutes=n)
+    if unit == "hour":
+        return dt + timedelta(hours=n)
+    if unit == "day":
+        return dt + timedelta(days=n)
     return add_months(dt, n)
 
 

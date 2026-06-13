@@ -5,8 +5,6 @@
 """
 from __future__ import annotations
 
-from .config import settings
-
 # 1. Приветствие /start
 WELCOME = (
     "<b>ДОБРО ПОЖАЛОВАТЬ В «11:11».</b>\n\n"
@@ -118,40 +116,41 @@ SOON = (
     "Сейчас идёт настройка тарифов и оплаты. Загляни чуть позже."
 )
 
-def _months_word(months: int) -> str:
-    if months % 10 == 1 and months % 100 != 11:
-        return "месяц"
-    if 2 <= months % 10 <= 4 and not 12 <= months % 100 <= 14:
-        return "месяца"
-    return "месяцев"
-
-
-def _minutes_word(n: int) -> str:
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    """Русское склонение по числу: 1 → one, 2–4 → few, иначе many."""
     if n % 10 == 1 and n % 100 != 11:
-        return "минуту"
+        return one
     if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        return "минуты"
-    return "минут"
+        return few
+    return many
 
 
-def period_short() -> str:
-    """Короткая единица длительности для подписей кнопок: «мес» или «мин» (тест)."""
-    return "мин" if settings.subscription_unit == "minutes" else "мес"
+# Полные формы и короткая подпись по единице длительности.
+_UNIT_FORMS = {
+    "month": ("месяц", "месяца", "месяцев"),
+    "day": ("день", "дня", "дней"),
+    "hour": ("час", "часа", "часов"),
+    "minute": ("минуту", "минуты", "минут"),
+}
+_UNIT_SHORT = {"month": "мес", "day": "дн", "hour": "ч", "minute": "мин"}
+
+# Человекочитаемые названия единиц для кнопок выбора в админке.
+UNIT_LABELS = {"month": "Месяц", "day": "День", "hour": "Час", "minute": "Минута"}
 
 
-def period_phrase(n: int) -> str:
-    """«3 месяца» / «3 минуты» — единица из настроек (склонение по числу)."""
-    if settings.subscription_unit == "minutes":
-        return f"{n} {_minutes_word(n)}"
-    return f"{n} {_months_word(n)}"
+def period_short(unit: str = "month") -> str:
+    """Короткая единица для подписей кнопок: «мес»/«дн»/«ч»/«мин»."""
+    return _UNIT_SHORT.get(unit, "мес")
+
+
+def period_phrase(value: int, unit: str = "month") -> str:
+    """«3 месяца» / «2 дня» / «5 минут» — значение + единица со склонением."""
+    forms = _UNIT_FORMS.get(unit, _UNIT_FORMS["month"])
+    return f"{value} {_plural(value, *forms)}"
 
 
 def _days_word(days: int) -> str:
-    if days % 10 == 1 and days % 100 != 11:
-        return "день"
-    if 2 <= days % 10 <= 4 and not 12 <= days % 100 <= 14:
-        return "дня"
-    return "дней"
+    return _plural(days, "день", "дня", "дней")
 
 
 def days_left_phrase(days: int) -> str:
@@ -161,13 +160,19 @@ def days_left_phrase(days: int) -> str:
     return f"{days} {_days_word(days)}"
 
 
-def remaining_phrase(end_date, now) -> str:
-    """Сколько осталось до окончания. В тест-режиме (minutes) — в минутах, иначе в днях."""
-    delta = end_date - now
-    if settings.subscription_unit == "minutes":
-        mins = max(0, int(delta.total_seconds() // 60))
-        return f"{mins} {_minutes_word(mins)}"
-    return days_left_phrase(delta.days)
+def remaining_phrase(end_date, now, unit: str = "month") -> str:
+    """Сколько осталось до окончания — в единице подписки (минуты/часы/дни/дни для мес)."""
+    secs = max(0, (end_date - now).total_seconds())
+    if unit == "minute":
+        n = int(secs // 60)
+        return f"{n} {_plural(n, *_UNIT_FORMS['minute'])}"
+    if unit == "hour":
+        n = int(secs // 3600)
+        return f"{n} {_plural(n, *_UNIT_FORMS['hour'])}"
+    if unit == "day":
+        n = int(secs // 86400)
+        return f"{n} {_plural(n, *_UNIT_FORMS['day'])}"
+    return days_left_phrase(int(secs // 86400))
 
 
 # 4. Выбор подписки (пользователь видит только длительности; ставка — автоматическая)
@@ -187,10 +192,10 @@ TARIFF_NONE = (
 
 
 # Итоговая сводка перед оплатой (без упоминания ступеней — это внутренняя механика).
-def tariff_summary(monthly_price: str, months: int, total: str) -> str:
+def tariff_summary(monthly_price: str, value: int, unit: str, total: str) -> str:
     return (
         "<b>ОФОРМЛЕНИЕ ПОДПИСКИ</b>\n\n"
-        f"Срок: {period_phrase(months)}\n"
+        f"Срок: {period_phrase(value, unit)}\n"
         f"Цена: {monthly_price} ₽ / месяц\n\n"
         f"<b>Итого к оплате: {total} ₽</b>\n\n"
         "После оплаты доступ в закрытый клуб откроется автоматически."

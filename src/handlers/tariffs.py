@@ -50,15 +50,14 @@ async def show_tariffs(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
 
     monthly = tier["monthly_price"]
     durations = await tariffs.get_active_durations(pool, redis)
-    prices = await tariffs.prices_for(pool, redis, tier, [d["months"] for d in durations])
+    prices = await tariffs.prices_for(pool, redis, tier, durations)
 
     b = InlineKeyboardBuilder()
     for d in durations:
-        months = d["months"]
-        total = prices[months]
+        total = prices[d["id"]]
         b.row(
             InlineKeyboardButton(
-                text=f"{months} {texts.period_short()} — {fmt_price(total)} ₽",
+                text=f"{d['months']} {texts.period_short(d['unit'])} — {fmt_price(total)} ₽",
                 callback_data=f"buy:{d['id']}",
             )
         )
@@ -80,19 +79,20 @@ async def show_summary(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
         return
 
     months = duration["months"]
+    unit = duration["unit"]
     monthly: Decimal = tier["monthly_price"]
-    total = await tariffs.period_price(pool, redis, tier, months)
-    await repo.set_fsm_state(pool, cb.from_user.id, f"screen:summary:{months}m")
+    total = await tariffs.period_price(pool, redis, tier, months, unit)
+    await repo.set_fsm_state(pool, cb.from_user.id, f"screen:summary:{months}{unit}")
 
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Перейти к оплате", callback_data=f"pay:create:{duration['id']}"))
     b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_TARIFF))
     await _edit(
         cb,
-        texts.tariff_summary(fmt_price(monthly), months, fmt_price(total)),
+        texts.tariff_summary(fmt_price(monthly), months, unit, fmt_price(total)),
         b.as_markup(),
     )
     logger.info(
-        f"🤖 Бот → @{cb.from_user.username or '—'}: сводка {months} мес × "
+        f"🤖 Бот → @{cb.from_user.username or '—'}: сводка {texts.period_phrase(months, unit)} × "
         f"{fmt_price(monthly)} ₽ = {fmt_price(total)} ₽"
     )

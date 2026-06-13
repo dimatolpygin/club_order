@@ -16,9 +16,11 @@ class AdminStates(StatesGroup):
     tier_price = State()
     tier_limit = State()
     tier_name = State()
-    tier_period_price = State()  # цена за конкретный период внутри ступени (data: tier_id, months)
-    dur_add = State()
+    tier_period_price = State()  # цена за период (data: tier_id, value, unit)
+    dur_add_value = State()   # ввод числа новой длительности (единица — кнопкой)
+    dur_add_unit = State()    # выбор единицы новой длительности (data: dur_value)
     member_id = State()
-    member_months = State()
+    member_value = State()    # ввод числа срока выдаваемой подписки
+    member_unit = State()     # выбор единицы срока (data: member_tg_id, member_value)
     user_lookup = State()    # поиск участника по tg_id
     broadcast_text = State()  # текст рассылки (подтверждение — кнопкой)

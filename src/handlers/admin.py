@@ -20,12 +20,12 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 from redis.asyncio import Redis
 
-from .. import repo
+from .. import repo, texts
 from ..config import settings
 from ..logger import logger
 from ..services import subscriptions, tariffs
 from ..states import AdminStates
-from ..utils import add_months, fmt_price
+from ..utils import add_period, fmt_price
 
 router = Router()
 
@@ -51,6 +51,20 @@ def _main_kb() -> InlineKeyboardBuilder:
 
 def _cancel_kb() -> InlineKeyboardBuilder:
     b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Отмена", callback_data="adm:menu"))
+    return b
+
+
+# Поддерживаемые единицы длительности (порядок — для кнопок выбора).
+_UNITS = ("month", "day", "hour", "minute")
+
+
+def _unit_kb(action: str) -> InlineKeyboardBuilder:
+    """Клавиатура выбора единицы: callback вида f'{action}:{unit}'."""
+    b = InlineKeyboardBuilder()
+    for u in _UNITS:
+        b.button(text=texts.UNIT_LABELS[u], callback_data=f"{action}:{u}")
+    b.adjust(2)
     b.row(InlineKeyboardButton(text="Отмена", callback_data="adm:menu"))
     return b
 
@@ -268,26 +282,29 @@ async def _periods_menu(cb: CallbackQuery, pool: asyncpg.Pool, tier_id: int) -> 
     lines = [
         f"<b>ЦЕНЫ ЗА ПЕРИОДЫ — ступень #{tier_id} «{escape(t['name'])}»</b>",
         f"Ставка за 1 мес: {fmt_price(monthly)} ₽",
-        "<i>Период без своей цены считается как ставка×месяцы. Можно задать любую цену.</i>",
+        "<i>Период без своей цены считается как ставка×значение. Можно задать любую цену.</i>",
         "",
     ]
     b = InlineKeyboardBuilder()
-    multi = [d for d in durations if d["months"] > 1]
-    if not multi:
-        lines.append("Нет активных периодов длиннее 1 мес.")
-    for d in multi:
-        m = d["months"]
-        custom = m in overrides
-        price = overrides[m] if custom else monthly * m
-        lines.append(f"{m} мес — {fmt_price(price)} ₽ ({'своя' if custom else 'авто'})")
+    # Цену можно задать для любой активной длительности, кроме канонического «1 месяц»
+    # (он равен ставке). Для дней/часов/минут цену обычно задаёт админ.
+    settable = [d for d in durations if not (d["months"] == 1 and d["unit"] == "month")]
+    if not settable:
+        lines.append("Нет активных периодов для своей цены.")
+    for d in settable:
+        key = (d["months"], d["unit"])
+        custom = key in overrides
+        price = overrides[key] if custom else monthly * d["months"]
+        label = texts.period_phrase(d["months"], d["unit"])
+        lines.append(f"{label} — {fmt_price(price)} ₽ ({'своя' if custom else 'авто'})")
         b.row(InlineKeyboardButton(
-            text=f"✎ {m} мес — {fmt_price(price)} ₽",
-            callback_data=f"adm:tpset:{tier_id}:{m}",
+            text=f"✎ {label} — {fmt_price(price)} ₽",
+            callback_data=f"adm:tpset:{tier_id}:{d['id']}",
         ))
         if custom:
             b.row(InlineKeyboardButton(
-                text=f"↺ Сброс {m} мес (к ставка×{m})",
-                callback_data=f"adm:tpreset:{tier_id}:{m}",
+                text=f"↺ Сброс {label} (к авто)",
+                callback_data=f"adm:tpreset:{tier_id}:{d['id']}",
             ))
     b.row(InlineKeyboardButton(text="Назад", callback_data=f"adm:tier:{tier_id}"))
     await _show(cb, "\n".join(lines), b)
@@ -301,16 +318,22 @@ async def adm_tier_periods(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 
 @router.callback_query(F.data.startswith("adm:tpset:"))
-async def adm_tier_period_set_start(cb: CallbackQuery, state: FSMContext) -> None:
+async def adm_tier_period_set_start(
+    cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool
+) -> None:
     if not _is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
-    _, _, tier_id, months = cb.data.split(":")
+    _, _, tier_id, dur_id = cb.data.split(":")
+    duration = await repo.get_duration(pool, int(dur_id))
+    if duration is None:
+        return await _periods_menu(cb, pool, int(tier_id))
+    value, unit = duration["months"], duration["unit"]
     await state.set_state(AdminStates.tier_period_price)
-    await state.update_data(tier_id=int(tier_id), months=int(months))
+    await state.update_data(tier_id=int(tier_id), value=value, unit=unit)
     await _show(
         cb,
-        f"Введите цену за {months} мес в рублях (например 3000). "
-        "Это итоговая сумма за весь период, не за месяц:",
+        f"Введите цену за {texts.period_phrase(value, unit)} в рублях (например 3000). "
+        "Это итоговая сумма за весь период:",
         _cancel_kb(),
     )
 
@@ -319,10 +342,15 @@ async def adm_tier_period_set_start(cb: CallbackQuery, state: FSMContext) -> Non
 async def adm_tier_period_reset(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> None:
     if not _is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
-    _, _, tier_id, months = cb.data.split(":")
-    await repo.delete_tier_price(pool, int(tier_id), int(months))
-    await tariffs.invalidate(redis)
-    logger.info(f"⚙️ Админ: сброс цены {months} мес ступени #{tier_id} (к ставка×мес)")
+    _, _, tier_id, dur_id = cb.data.split(":")
+    duration = await repo.get_duration(pool, int(dur_id))
+    if duration is not None:
+        await repo.delete_tier_price(pool, int(tier_id), duration["months"], duration["unit"])
+        await tariffs.invalidate(redis)
+        logger.info(
+            f"⚙️ Админ: сброс цены {duration['months']}{duration['unit']} "
+            f"ступени #{tier_id} (к авто)"
+        )
     await _periods_menu(cb, pool, int(tier_id))
 
 
@@ -339,18 +367,18 @@ async def adm_tier_period_set(
     except (InvalidOperation, ValueError):
         return await message.answer("Не похоже на цену. Введите число, например 3000:")
     data = await state.get_data()
-    tier_id, months = data["tier_id"], data["months"]
-    await repo.set_tier_price(pool, tier_id, months, price)
+    tier_id, value, unit = data["tier_id"], data["value"], data["unit"]
+    await repo.set_tier_price(pool, tier_id, value, unit, price)
     await tariffs.invalidate(redis)
     await state.clear()
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="К периодам", callback_data=f"adm:tperiods:{tier_id}"))
     b.row(InlineKeyboardButton(text="В меню", callback_data="adm:menu"))
     await message.answer(
-        f"Цена за {months} мес ступени #{tier_id}: {fmt_price(price)} ₽.",
+        f"Цена за {texts.period_phrase(value, unit)} ступени #{tier_id}: {fmt_price(price)} ₽.",
         reply_markup=b.as_markup(),
     )
-    logger.info(f"⚙️ Админ: цена {months} мес ступени #{tier_id} = {price}")
+    logger.info(f"⚙️ Админ: цена {value}{unit} ступени #{tier_id} = {price}")
 
 
 # ── Длительности ─────────────────────────────────────────────────────────────
@@ -363,10 +391,11 @@ async def adm_durs(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     b = InlineKeyboardBuilder()
     for r in rows:
         mark = "✓" if r["is_active"] else "✕"
-        lines.append(f"{mark} {r['months']} мес")
+        label = texts.period_phrase(r["months"], r["unit"])
+        lines.append(f"{mark} {label}")
         b.row(InlineKeyboardButton(
-            text=f"{mark} {r['months']} мес",
-            callback_data=f"adm:dtoggle:{r['months']}",
+            text=f"{mark} {label}",
+            callback_data=f"adm:dtoggle:{r['id']}",
         ))
     b.row(InlineKeyboardButton(text="Добавить длительность", callback_data="adm:dadd"))
     b.row(InlineKeyboardButton(text="Назад", callback_data="adm:menu"))
@@ -377,13 +406,15 @@ async def adm_durs(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def adm_dur_toggle(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> None:
     if not _is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
-    months = int(cb.data.rsplit(":", 1)[1])
-    rows = {r["months"]: r for r in await repo.get_all_durations(pool)}
-    cur = rows.get(months)
+    dur_id = int(cb.data.rsplit(":", 1)[1])
+    cur = await repo.get_duration(pool, dur_id)
     if cur is not None:
-        await repo.set_duration_active(pool, months, not cur["is_active"])
+        await repo.set_duration_active(pool, dur_id, not cur["is_active"])
         await tariffs.invalidate(redis)
-        logger.info(f"⚙️ Админ: длительность {months} мес active={not cur['is_active']}")
+        logger.info(
+            f"⚙️ Админ: длительность #{dur_id} "
+            f"{cur['months']}{cur['unit']} active={not cur['is_active']}"
+        )
     await adm_durs(cb, pool)
 
 
@@ -391,28 +422,42 @@ async def adm_dur_toggle(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) ->
 async def adm_dur_add_start(cb: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
-    await state.set_state(AdminStates.dur_add)
-    await _show(cb, "Введите число месяцев для новой длительности (например 9):", _cancel_kb())
+    await state.set_state(AdminStates.dur_add_value)
+    await _show(cb, "Введите число для новой длительности (например 1, 3, 7):", _cancel_kb())
 
 
-@router.message(AdminStates.dur_add)
-async def adm_dur_add_set(
-    message: Message, state: FSMContext, pool: asyncpg.Pool, redis: Redis
-) -> None:
+@router.message(AdminStates.dur_add_value)
+async def adm_dur_add_value(message: Message, state: FSMContext) -> None:
     if not _is_admin(message.from_user.id):
         return
     raw = (message.text or "").strip()
     if not raw.isdigit() or int(raw) <= 0:
-        return await message.answer("Введите положительное целое число месяцев:")
-    months = int(raw)
-    await repo.upsert_duration(pool, months, True)
+        return await message.answer("Введите положительное целое число:")
+    await state.update_data(dur_value=int(raw))
+    await state.set_state(AdminStates.dur_add_unit)
+    await message.answer(
+        f"Длительность: {raw}. Выберите единицу:",
+        reply_markup=_unit_kb("adm:dunit").as_markup(),
+    )
+
+
+@router.callback_query(AdminStates.dur_add_unit, F.data.startswith("adm:dunit:"))
+async def adm_dur_add_unit(
+    cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, redis: Redis
+) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    unit = cb.data.rsplit(":", 1)[1]
+    value = (await state.get_data())["dur_value"]
+    await repo.upsert_duration(pool, value, unit, True)
     await tariffs.invalidate(redis)
     await state.clear()
-    await message.answer(
-        f"Длительность {months} мес добавлена и включена.",
-        reply_markup=_main_kb().as_markup(),
+    await _show(
+        cb,
+        f"Длительность {texts.period_phrase(value, unit)} добавлена и включена.",
+        _main_kb(),
     )
-    logger.info(f"⚙️ Админ: добавлена длительность {months} мес")
+    logger.info(f"⚙️ Админ: добавлена длительность {value} {unit}")
 
 
 # ── Добавление участника вручную ─────────────────────────────────────────────
@@ -436,56 +481,73 @@ async def adm_member_id(message: Message, state: FSMContext) -> None:
     if not raw.lstrip("-").isdigit():
         return await message.answer("Введите числовой Telegram ID:")
     await state.update_data(member_tg_id=int(raw))
-    await state.set_state(AdminStates.member_months)
-    await message.answer("На сколько месяцев выдать подписку? (число):", reply_markup=_cancel_kb().as_markup())
+    await state.set_state(AdminStates.member_value)
+    await message.answer(
+        "На какой срок выдать подписку? Введите число (единицу выберете далее):",
+        reply_markup=_cancel_kb().as_markup(),
+    )
 
 
-@router.message(AdminStates.member_months)
-async def adm_member_months(
-    message: Message, state: FSMContext, pool: asyncpg.Pool, redis: Redis
-) -> None:
+@router.message(AdminStates.member_value)
+async def adm_member_value(message: Message, state: FSMContext) -> None:
     if not _is_admin(message.from_user.id):
         return
     raw = (message.text or "").strip()
     if not raw.isdigit() or int(raw) <= 0:
-        return await message.answer("Введите положительное число месяцев:")
-    months = int(raw)
-    tg_id = (await state.get_data())["member_tg_id"]
+        return await message.answer("Введите положительное целое число:")
+    await state.update_data(member_value=int(raw))
+    await state.set_state(AdminStates.member_unit)
+    await message.answer(
+        f"Срок: {raw}. Выберите единицу:",
+        reply_markup=_unit_kb("adm:munit").as_markup(),
+    )
+
+
+@router.callback_query(AdminStates.member_unit, F.data.startswith("adm:munit:"))
+async def adm_member_unit(
+    cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, redis: Redis
+) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    unit = cb.data.rsplit(":", 1)[1]
+    data = await state.get_data()
+    tg_id, value = data["member_tg_id"], data["member_value"]
 
     # Цена — текущая ставка движка на момент добавления.
     tier = await tariffs.get_current_tier(pool, redis)
     if tier is None:
         await state.clear()
-        return await message.answer(
-            "Не удалось определить текущую ставку (нет активных ступеней).",
-            reply_markup=_main_kb().as_markup(),
+        return await _show(
+            cb, "Не удалось определить текущую ставку (нет активных ступеней).", _main_kb()
         )
     await repo.upsert_user(pool, tg_id, None, None)
-    end_date = add_months(datetime.now(timezone.utc), months)
+    end_date = add_period(datetime.now(timezone.utc), value, unit)
     sub_id = await repo.add_subscription(
-        pool, tg_id, tier["id"], tier["monthly_price"], months, end_date,
-        source="manual", status="active",
+        pool, tg_id, tier["id"], tier["monthly_price"], value, end_date,
+        source="manual", status="active", unit=unit,
     )
     await state.clear()
-    await message.answer(
+    await _show(
+        cb,
         f"Подписка #{sub_id} создана: tg_id <code>{tg_id}</code>, "
-        f"{fmt_price(tier['monthly_price'])} ₽/мес × {months} мес, до {end_date:%d.%m.%Y}.",
-        reply_markup=_main_kb().as_markup(),
+        f"{fmt_price(tier['monthly_price'])} ₽/мес · {texts.period_phrase(value, unit)}, "
+        f"до {end_date:%d.%m.%Y %H:%M}.",
+        _main_kb(),
     )
-    logger.info(f"⚙️ Админ вручную добавил подписку #{sub_id} для tg_id={tg_id}")
+    logger.info(f"⚙️ Админ вручную добавил подписку #{sub_id} для tg_id={tg_id} ({value} {unit})")
 
 
 # ── Поиск участника / карточка статуса ───────────────────────────────────────
 def _sub_line(sub) -> str:
     now = datetime.now(timezone.utc)
-    days_left = (sub["end_date"] - now).days
+    remaining = texts.remaining_phrase(sub["end_date"], now, sub["unit"])
     src = {"payment": "оплата", "manual": "вручную", "promo": "промокод"}.get(
         sub["source"], sub["source"]
     )
     return (
-        f"{fmt_price(sub['fixed_price'])} ₽/мес · {sub['months']} мес · "
-        f"{sub['start_date']:%d.%m.%Y}–{sub['end_date']:%d.%m.%Y} "
-        f"(осталось {days_left} дн.) · статус {sub['status']} · источник {src}"
+        f"{fmt_price(sub['fixed_price'])} ₽/мес · {texts.period_phrase(sub['months'], sub['unit'])} · "
+        f"{sub['start_date']:%d.%m.%Y %H:%M}–{sub['end_date']:%d.%m.%Y %H:%M} "
+        f"(осталось {remaining}) · статус {sub['status']} · источник {src}"
     )
 
 
