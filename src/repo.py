@@ -6,7 +6,8 @@ from decimal import Decimal
 
 import asyncpg
 
-from .utils import add_months
+from .config import settings
+from .utils import add_period
 
 
 async def upsert_user(
@@ -360,7 +361,9 @@ async def activate_payment(
                     pay["tg_id"],
                 )
                 if active is not None:
-                    new_end = add_months(active["end_date"], months)
+                    new_end = add_period(
+                        active["end_date"], months, settings.subscription_unit
+                    )
                     await conn.execute(
                         "UPDATE subscriptions SET end_date = $2, updated_at = now() "
                         "WHERE id = $1",
@@ -388,7 +391,7 @@ async def activate_payment(
                 pay["tier_id"],
                 pay["fixed_price"],
                 months,
-                add_months(now, months),
+                add_period(now, months, settings.subscription_unit),
             )
             await conn.execute(
                 "UPDATE payments SET status = 'succeeded', subscription_id = $2, "

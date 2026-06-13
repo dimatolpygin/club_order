@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from .config import settings
+
 # 1. Приветствие /start
 WELCOME = (
     "<b>ДОБРО ПОЖАЛОВАТЬ В «11:11».</b>\n\n"
@@ -124,6 +126,26 @@ def _months_word(months: int) -> str:
     return "месяцев"
 
 
+def _minutes_word(n: int) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return "минуту"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "минуты"
+    return "минут"
+
+
+def period_short() -> str:
+    """Короткая единица длительности для подписей кнопок: «мес» или «мин» (тест)."""
+    return "мин" if settings.subscription_unit == "minutes" else "мес"
+
+
+def period_phrase(n: int) -> str:
+    """«3 месяца» / «3 минуты» — единица из настроек (склонение по числу)."""
+    if settings.subscription_unit == "minutes":
+        return f"{n} {_minutes_word(n)}"
+    return f"{n} {_months_word(n)}"
+
+
 def _days_word(days: int) -> str:
     if days % 10 == 1 and days % 100 != 11:
         return "день"
@@ -137,6 +159,15 @@ def days_left_phrase(days: int) -> str:
     if days <= 0:
         return "менее суток"
     return f"{days} {_days_word(days)}"
+
+
+def remaining_phrase(end_date, now) -> str:
+    """Сколько осталось до окончания. В тест-режиме (minutes) — в минутах, иначе в днях."""
+    delta = end_date - now
+    if settings.subscription_unit == "minutes":
+        mins = max(0, int(delta.total_seconds() // 60))
+        return f"{mins} {_minutes_word(mins)}"
+    return days_left_phrase(delta.days)
 
 
 # 4. Выбор подписки (пользователь видит только длительности; ставка — автоматическая)
@@ -159,7 +190,7 @@ TARIFF_NONE = (
 def tariff_summary(monthly_price: str, months: int, total: str) -> str:
     return (
         "<b>ОФОРМЛЕНИЕ ПОДПИСКИ</b>\n\n"
-        f"Срок: {months} {_months_word(months)}\n"
+        f"Срок: {period_phrase(months)}\n"
         f"Цена: {monthly_price} ₽ / месяц\n\n"
         f"<b>Итого к оплате: {total} ₽</b>\n\n"
         "После оплаты доступ в закрытый клуб откроется автоматически."

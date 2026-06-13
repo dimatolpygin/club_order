@@ -58,7 +58,7 @@ async def show_tariffs(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
         total = prices[months]
         b.row(
             InlineKeyboardButton(
-                text=f"{months} мес — {fmt_price(total)} ₽",
+                text=f"{months} {texts.period_short()} — {fmt_price(total)} ₽",
                 callback_data=f"buy:{d['id']}",
             )
         )

@@ -123,7 +123,7 @@ def _renew_kb(durations, monthly) -> InlineKeyboardMarkup:
         months = d["months"]
         total = monthly * months
         b.row(InlineKeyboardButton(
-            text=f"{months} мес — {fmt_price(total)} ₽",
+            text=f"{months} {texts.period_short()} — {fmt_price(total)} ₽",
             callback_data=f"renew:{d['id']}",
         ))
     b.row(InlineKeyboardButton(text="Моя подписка", callback_data=kb.NAV_MYSUB))
@@ -197,7 +197,6 @@ async def _my_subscription_view(
         b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
         return texts.MY_SUB_NONE, b.as_markup(), False
 
-    days_left = (sub["end_date"] - datetime.now(timezone.utc)).days
     b = InlineKeyboardBuilder()
     payments.add_chat_button(b)
     b.row(InlineKeyboardButton(text="Продлить подписку", callback_data=kb.NAV_RENEW))
@@ -207,7 +206,7 @@ async def _my_subscription_view(
         fmt_price(sub["fixed_price"]),
         sub["start_date"],
         sub["end_date"],
-        texts.days_left_phrase(days_left),
+        texts.remaining_phrase(sub["end_date"], datetime.now(timezone.utc)),
         user_id,
     )
     return text, b.as_markup(), True
