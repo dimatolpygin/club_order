@@ -34,3 +34,5 @@ class AdminStates(StatesGroup):
     promo_value = State()     # значение (ставка ₽/мес или процент), data: kind
     promo_limit = State()     # лимит активаций (0 = безлимит)
     promo_expiry = State()    # срок действия в днях (0 = бессрочно)
+    # Правка порогов напоминаний на лету (единица — кнопкой). data: rem_kind.
+    rem_offset = State()

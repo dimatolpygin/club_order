@@ -23,7 +23,7 @@ from redis.asyncio import Redis
 from .. import repo, texts
 from ..config import settings
 from ..logger import logger
-from ..services import promo as promo_service, subscriptions, tariffs
+from ..services import app_settings, promo as promo_service, subscriptions, tariffs
 from ..states import AdminStates
 from ..utils import add_period, fmt_price
 
@@ -45,6 +45,10 @@ def _main_kb() -> InlineKeyboardBuilder:
     )
     b.row(InlineKeyboardButton(text="Рассылка", callback_data="adm:bcaststart"))
     b.row(InlineKeyboardButton(text="Промокоды", callback_data="adm:promos"))
+    b.row(
+        InlineKeyboardButton(text="Напоминания", callback_data="adm:rem"),
+        InlineKeyboardButton(text="Застрявшие в FSM", callback_data="adm:fsm"),
+    )
     b.row(InlineKeyboardButton(text="Статистика", callback_data="adm:stats"))
     b.row(InlineKeyboardButton(text="Закрыть", callback_data="adm:close"))
     return b
@@ -70,7 +74,20 @@ def _unit_kb(action: str) -> InlineKeyboardBuilder:
     return b
 
 
-_MAIN_TEXT = "<b>АДМИН-ПАНЕЛЬ</b>\n\nВыбери раздел:"
+_MAIN_TEXT = (
+    "<b>АДМИН-ПАНЕЛЬ</b>\n\n"
+    "Доступные команды:\n"
+    "· <b>Ценовые ступени</b> — цены, лимиты мест, цены за периоды\n"
+    "· <b>Длительности</b> — добавить/включить/удалить сроки подписки\n"
+    "· <b>Поиск участника</b> — статус подписки и доступа по Telegram ID\n"
+    "· <b>Добавить участника</b> — выдать подписку оплатившему вручную\n"
+    "· <b>Рассылка</b> — сообщение всем пользователям базы\n"
+    "· <b>Промокоды</b> — создать/включить/выключить коды\n"
+    "· <b>Напоминания</b> — пороги и единица напоминаний о продлении\n"
+    "· <b>Застрявшие в FSM</b> — кто на каком шаге сценария\n"
+    "· <b>Статистика</b> — занятые места и текущая ставка\n\n"
+    "Выбери раздел:"
+)
 
 
 async def _show(cb: CallbackQuery, text: str, b: InlineKeyboardBuilder) -> None:
@@ -950,6 +967,127 @@ async def adm_promo_create(cb: CallbackQuery, state: FSMContext, pool: asyncpg.P
     )
 
 
+# ── Напоминания (пороги/единица на лету) ─────────────────────────────────────
+async def _rem_view(pool: asyncpg.Pool) -> tuple[str, InlineKeyboardBuilder]:
+    cfg = await app_settings.reminder_config(pool)
+    unit_label = texts.UNIT_LABELS.get(cfg["unit"], cfg["unit"])
+    off = cfg["offsets"]
+    text = (
+        "<b>НАПОМИНАНИЯ О ПРОДЛЕНИИ</b>\n\n"
+        f"Единица порогов: <b>{unit_label}</b>\n"
+        f"За сколько до конца (в этих единицах):\n"
+        f"· раннее «осталось N» — <b>{off['early']}</b>\n"
+        f"· «завтра» — <b>{off['soon']}</b>\n"
+        f"· «последний день» — <b>{off['last']}</b>\n\n"
+        f"Проверка идёт каждые {settings.reminder_check_interval_min} мин "
+        "(частота — в .env). Пороги и единица применяются сразу, без рестарта.\n\n"
+        "Что меняем?"
+    )
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text=f"Единица: {unit_label}", callback_data="adm:remunit"))
+    b.row(InlineKeyboardButton(text=f"Раннее ({off['early']})", callback_data="adm:remset:early"))
+    b.row(InlineKeyboardButton(text=f"«Завтра» ({off['soon']})", callback_data="adm:remset:soon"))
+    b.row(InlineKeyboardButton(text=f"Последний день ({off['last']})", callback_data="adm:remset:last"))
+    b.row(InlineKeyboardButton(text="Назад", callback_data="adm:menu"))
+    return text, b
+
+
+@router.callback_query(F.data == "adm:rem")
+async def adm_rem(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    text, b = await _rem_view(pool)
+    await _show(cb, text, b)
+
+
+@router.callback_query(F.data == "adm:remunit")
+async def adm_rem_unit_choose(cb: CallbackQuery) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    await _show(cb, "Выберите единицу порогов напоминаний:", _unit_kb("adm:remu"))
+
+
+@router.callback_query(F.data.startswith("adm:remu:"))
+async def adm_rem_unit_set(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    unit = cb.data.rsplit(":", 1)[1]
+    if unit in app_settings.VALID_UNITS:
+        await app_settings.set_reminder_unit(pool, unit)
+        logger.info(f"⚙️ Админ: единица напоминаний = {unit}")
+    text, b = await _rem_view(pool)
+    await _show(cb, text, b)
+
+
+_REM_KIND_LABEL = {"early": "раннее", "soon": "«завтра»", "last": "последний день"}
+
+
+@router.callback_query(F.data.startswith("adm:remset:"))
+async def adm_rem_offset_start(cb: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    kind = cb.data.rsplit(":", 1)[1]
+    await state.set_state(AdminStates.rem_offset)
+    await state.update_data(rem_kind=kind)
+    await _show(
+        cb,
+        f"Введите порог для «{_REM_KIND_LABEL[kind]}» — сколько целых единиц "
+        "должно остаться до конца (целое число, 0 — последняя единица):",
+        _cancel_kb(),
+    )
+
+
+@router.message(AdminStates.rem_offset)
+async def adm_rem_offset_set(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        return await message.answer("Введите целое число (0 или больше):")
+    kind = (await state.get_data())["rem_kind"]
+    await app_settings.set_reminder_offset(pool, kind, int(raw))
+    await state.clear()
+    logger.info(f"⚙️ Админ: порог напоминания {kind} = {raw}")
+    text, b = await _rem_view(pool)
+    await message.answer(text, reply_markup=b.as_markup())
+
+
+# ── Застрявшие в FSM ─────────────────────────────────────────────────────────
+def _ago(dt: datetime, now: datetime) -> str:
+    secs = max(0, int((now - dt).total_seconds()))
+    if secs < 3600:
+        return f"{secs // 60} мин назад"
+    if secs < 86400:
+        return f"{secs // 3600} ч назад"
+    return f"{secs // 86400} дн назад"
+
+
+@router.callback_query(F.data == "adm:fsm")
+async def adm_fsm(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    rows = await repo.get_fsm_stuck(pool)
+    now = datetime.now(timezone.utc)
+    lines = [
+        "<b>ЗАСТРЯВШИЕ В FSM</b>",
+        "<i>Последний шаг сценария у пользователей (свежие сверху).</i>",
+        "",
+    ]
+    if not rows:
+        lines.append("Сейчас никто не в процессе.")
+    for r in rows:
+        uname = f"@{escape(r['username'])}" if r["username"] else "—"
+        name = escape(r["first_name"] or "")
+        lines.append(
+            f"<code>{r['tg_id']}</code> {uname} {name} · "
+            f"<b>{escape(r['state'] or '')}</b> · {_ago(r['updated_at'], now)}"
+        )
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Обновить", callback_data="adm:fsm"))
+    b.row(InlineKeyboardButton(text="Назад", callback_data="adm:menu"))
+    await _show(cb, "\n".join(lines), b)
+
+
 # ── Статистика ───────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "adm:stats")
 async def adm_stats(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> None:
@@ -961,11 +1099,21 @@ async def adm_stats(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> None
         f"{escape(tier['name'])} — {fmt_price(tier['monthly_price'])} ₽/мес"
         if tier else "—"
     )
-    text = (
-        "<b>СТАТИСТИКА</b>\n\n"
-        f"Активных участников (занято мест): <b>{taken}</b>\n"
-        f"Текущая ставка: {cur}"
-    )
+    tiers = await repo.get_all_tiers(pool)
+    occ = await repo.tier_occupancy(pool)
+    lines = [
+        "<b>СТАТИСТИКА</b>",
+        "",
+        f"Активных участников (занято мест): <b>{taken}</b>",
+        f"Текущая ставка: {cur}",
+        "",
+        "<b>Занято по ступеням:</b>",
+    ]
+    for t in tiers:
+        limit = "∞" if t["seat_limit"] is None else str(t["seat_limit"])
+        lines.append(
+            f"· {escape(t['name'])}: {occ.get(t['id'], 0)} (брекет {limit})"
+        )
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Назад", callback_data="adm:menu"))
-    await _show(cb, text, b)
+    await _show(cb, "\n".join(lines), b)

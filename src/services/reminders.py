@@ -27,9 +27,9 @@ import asyncpg
 
 from .. import keyboards as kb
 from .. import repo, texts
-from ..config import settings
 from ..logger import logger
 from ..utils import fmt_price
+from . import app_settings
 
 # Порядок типов от раннего к позднему.
 REMINDER_KINDS = ("early", "soon", "last")
@@ -37,14 +37,6 @@ REMINDER_KINDS = ("early", "soon", "last")
 _URGENCY = {"last": 0, "soon": 1, "early": 2}
 # Сколько секунд в одной единице порога.
 _UNIT_SECONDS = {"minute": 60, "hour": 3600, "day": 86400, "month": 30 * 86400}
-
-
-def _offsets() -> dict[str, int]:
-    return {
-        "early": settings.reminder_early_offset,
-        "soon": settings.reminder_soon_offset,
-        "last": settings.reminder_last_offset,
-    }
 
 
 def due_reminder_kinds(
@@ -84,8 +76,9 @@ def _render(kind: str, row: asyncpg.Record, now: datetime) -> tuple[str, object]
 
 async def run_reminder_check(pool: asyncpg.Pool, bot: Bot) -> None:
     """Фоновый проход: разослать причитающиеся напоминания о продлении."""
-    unit_seconds = _UNIT_SECONDS.get(settings.reminder_unit, _UNIT_SECONDS["day"])
-    offsets = _offsets()
+    cfg = await app_settings.reminder_config(pool)  # читаем на лету (правится в админке)
+    unit_seconds = _UNIT_SECONDS.get(cfg["unit"], _UNIT_SECONDS["day"])
+    offsets = cfg["offsets"]
     now = datetime.now(timezone.utc)
 
     rows = await repo.get_subscriptions_for_reminders(pool)

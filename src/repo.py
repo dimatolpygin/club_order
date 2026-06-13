@@ -48,6 +48,46 @@ async def set_user_blocked(pool: asyncpg.Pool, tg_id: int, blocked: bool) -> Non
     )
 
 
+# ── Рантайм-настройки (bot_settings, этап 8) ─────────────────────────────────
+async def get_settings(pool: asyncpg.Pool, keys: list[str]) -> dict[str, str]:
+    """Значения настроек по списку ключей (отсутствующие ключи просто не попадут)."""
+    rows = await pool.fetch(
+        "SELECT key, value FROM bot_settings WHERE key = ANY($1::text[])", keys
+    )
+    return {r["key"]: r["value"] for r in rows}
+
+
+async def set_setting(pool: asyncpg.Pool, key: str, value: str) -> None:
+    await pool.execute(
+        """
+        INSERT INTO bot_settings(key, value)
+        VALUES($1, $2)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+        """,
+        key,
+        value,
+    )
+
+
+async def get_fsm_stuck(pool: asyncpg.Pool, limit: int = 30) -> list[asyncpg.Record]:
+    """Пользователи и их последний шаг (FSM-экран) — кто где находится/застрял.
+
+    Берём из лога состояний только незавершённые шаги (state не пуст), свежие —
+    сверху. Присоединяем username/имя для читаемости.
+    """
+    return await pool.fetch(
+        """
+        SELECT f.tg_id, f.state, f.updated_at, u.username, u.first_name
+        FROM fsm_states f
+        LEFT JOIN users u ON u.tg_id = f.tg_id
+        WHERE f.state IS NOT NULL
+        ORDER BY f.updated_at DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+
+
 async def set_fsm_state(pool: asyncpg.Pool, tg_id: int, state: str | None) -> None:
     """Фиксирует текущее FSM-состояние пользователя (чтобы видеть, где застрял).
 
