@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -80,7 +79,6 @@ async def show_summary(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
 
     months = duration["months"]
     unit = duration["unit"]
-    monthly: Decimal = tier["monthly_price"]
     total = await tariffs.period_price(pool, redis, tier, months, unit)
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:summary:{months}{unit}")
 
@@ -89,10 +87,10 @@ async def show_summary(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
     b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_TARIFF))
     await _edit(
         cb,
-        texts.tariff_summary(fmt_price(monthly), months, unit, fmt_price(total)),
+        texts.tariff_summary(months, unit, fmt_price(total)),
         b.as_markup(),
     )
     logger.info(
-        f"🤖 Бот → @{cb.from_user.username or '—'}: сводка {texts.period_phrase(months, unit)} × "
-        f"{fmt_price(monthly)} ₽ = {fmt_price(total)} ₽"
+        f"🤖 Бот → @{cb.from_user.username or '—'}: сводка {texts.period_phrase(months, unit)} "
+        f"= {fmt_price(total)} ₽"
     )

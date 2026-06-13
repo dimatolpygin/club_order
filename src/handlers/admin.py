@@ -580,9 +580,6 @@ async def _user_card(pool: asyncpg.Pool, tg_id: int) -> tuple[str, bool]:
             lines.append("Последняя: " + _sub_line(last))
         lines.append("Доступ в клуб: <b>нет</b>")
 
-    # Статус оплаты (детально) и фактическое членство в группе появятся на этапах 3–4.
-    lines.append("")
-    lines.append("<i>Детальный статус платежей — с этапа 3, членство в группе — с этапа 4.</i>")
     return "\n".join(lines), active is not None
 
 

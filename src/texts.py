@@ -192,11 +192,10 @@ TARIFF_NONE = (
 
 
 # Итоговая сводка перед оплатой (без упоминания ступеней — это внутренняя механика).
-def tariff_summary(monthly_price: str, value: int, unit: str, total: str) -> str:
+def tariff_summary(value: int, unit: str, total: str) -> str:
     return (
         "<b>ОФОРМЛЕНИЕ ПОДПИСКИ</b>\n\n"
-        f"Срок: {period_phrase(value, unit)}\n"
-        f"Цена: {monthly_price} ₽ / месяц\n\n"
+        f"Срок: {period_phrase(value, unit)}\n\n"
         f"<b>Итого к оплате: {total} ₽</b>\n\n"
         "После оплаты доступ в закрытый клуб откроется автоматически."
     )
