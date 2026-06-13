@@ -749,6 +749,52 @@ async def adm_bcast_start(cb: CallbackQuery, state: FSMContext) -> None:
     )
 
 
+# Сбор альбомов: media_group приходит несколькими сообщениями ОДНОВРЕМЕННО, поэтому
+# копим их по media_group_id и обрабатываем одной пачкой после короткой паузы —
+# иначе параллельные хендлеры перезатирают список фото в FSM.
+_album_buffer: dict[str, list[Message]] = {}
+_ALBUM_DEBOUNCE = 1.5  # сек ожидания остальных фото альбома
+
+
+async def _process_bcast_photos(
+    messages: list[Message], state: FSMContext, bot: Bot
+) -> None:
+    """Загружает пачку фото в S3 и обновляет FSM-данные рассылки ОДИН раз."""
+    data = await state.get_data()
+    photos = list(data.get("bcast_photos") or [])
+    text = data.get("bcast_text")
+    added = failed = skipped = 0
+    for m in messages:
+        if len(photos) >= _BCAST_MAX_PHOTOS:
+            skipped += 1
+            continue
+        try:
+            buf = await bot.download(m.photo[-1])
+            url = await storage.upload_photo(buf.read(), "jpg")
+            photos.append({"url": url, "file_id": m.photo[-1].file_id})
+            added += 1
+        except Exception as e:  # noqa: BLE001 — ошибка фото не должна ронять сценарий
+            failed += 1
+            logger.error(f"Рассылка: не удалось загрузить фото в S3: {e}")
+        caption = m.html_text or m.caption
+        if caption and not text:
+            text = caption
+    await state.update_data(bcast_photos=photos, bcast_text=text)
+    note = f"Фото добавлено: {added} (всего: {len(photos)})."
+    if failed:
+        note += f" Не загрузилось: {failed}."
+    if skipped:
+        note += f" Превышен лимит {_BCAST_MAX_PHOTOS}, лишние пропущены."
+    await messages[0].answer(note, reply_markup=_bcast_compose_kb(len(photos)).as_markup())
+
+
+async def _finalize_album(key: str, state: FSMContext, bot: Bot) -> None:
+    await asyncio.sleep(_ALBUM_DEBOUNCE)
+    messages = _album_buffer.pop(key, [])
+    if messages:
+        await _process_bcast_photos(messages, state, bot)
+
+
 @router.message(AdminStates.broadcast_compose, F.photo)
 async def adm_bcast_add_photo(
     message: Message, state: FSMContext, bot: Bot
@@ -757,28 +803,15 @@ async def adm_bcast_add_photo(
         return
     if not settings.s3_enabled:
         return await message.answer("Фото недоступны: S3 не настроен. Пришлите текст.")
-    data = await state.get_data()
-    photos = list(data.get("bcast_photos") or [])
-    if len(photos) >= _BCAST_MAX_PHOTOS:
-        return await message.answer(f"Уже добавлено максимум фото ({_BCAST_MAX_PHOTOS}).")
-    file_id = message.photo[-1].file_id
-    try:
-        buf = await bot.download(message.photo[-1])
-        url = await storage.upload_photo(buf.read(), "jpg")
-    except Exception as e:  # noqa: BLE001 — ошибка загрузки не должна ронять сценарий
-        logger.error(f"Рассылка: не удалось загрузить фото в S3: {e}")
-        return await message.answer("Не удалось загрузить фото в хранилище. Попробуйте ещё раз.")
-    photos.append({"url": url, "file_id": file_id})
-    # Подпись из фото берём, если текст ещё не задан.
-    caption = message.html_text or message.caption
-    updates = {"bcast_photos": photos}
-    if caption and not data.get("bcast_text"):
-        updates["bcast_text"] = caption
-    await state.update_data(**updates)
-    await message.answer(
-        f"Фото добавлено (всего: {len(photos)}).",
-        reply_markup=_bcast_compose_kb(len(photos)).as_markup(),
-    )
+    # Одиночное фото — сразу; альбом — копим по группе и обрабатываем пачкой.
+    if message.media_group_id is None:
+        await _process_bcast_photos([message], state, bot)
+        return
+    key = f"{message.chat.id}:{message.media_group_id}"
+    is_first = key not in _album_buffer
+    _album_buffer.setdefault(key, []).append(message)
+    if is_first:
+        asyncio.create_task(_finalize_album(key, state, bot))
 
 
 @router.message(AdminStates.broadcast_compose, F.text)
