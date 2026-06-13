@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     club_chat_id: str = ""
     club_chat_invite_url: str = ""
 
+    # Ссылка на аккаунт поддержки (кнопка «Перейти» в разделе «Поддержка»).
+    # Обычно задаётся из админки (bot_settings) — это .env-fallback.
+    support_url: str = ""
+
     # ── База данных ──────────────────────────────────────────────────────────
     # DSN для asyncpg (runtime). Пример: postgresql://user:pass@host:5432/db
     database_url: str

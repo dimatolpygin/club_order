@@ -19,6 +19,9 @@ KEY_EARLY = "reminder_early_offset"
 KEY_SOON = "reminder_soon_offset"
 KEY_LAST = "reminder_last_offset"
 
+# Ссылка на аккаунт поддержки (кнопка «Перейти» в разделе «Поддержка»).
+KEY_SUPPORT_URL = "support_url"
+
 _OFFSET_KEYS = {
     "early": (KEY_EARLY, "reminder_early_offset"),
     "soon": (KEY_SOON, "reminder_soon_offset"),
@@ -51,3 +54,13 @@ async def set_reminder_unit(pool: asyncpg.Pool, unit: str) -> None:
 async def set_reminder_offset(pool: asyncpg.Pool, kind: str, value: int) -> None:
     store_key = _OFFSET_KEYS[kind][0]
     await repo.set_setting(pool, store_key, str(value))
+
+
+async def support_url(pool: asyncpg.Pool) -> str:
+    """Текущая ссылка поддержки: из bot_settings, иначе .env-дефолт (может быть пустой)."""
+    stored = await repo.get_settings(pool, [KEY_SUPPORT_URL])
+    return stored.get(KEY_SUPPORT_URL) or settings.support_url
+
+
+async def set_support_url(pool: asyncpg.Pool, url: str) -> None:
+    await repo.set_setting(pool, KEY_SUPPORT_URL, url)

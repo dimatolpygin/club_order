@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -53,6 +54,7 @@ def _main_kb() -> InlineKeyboardBuilder:
         InlineKeyboardButton(text="Напоминания", callback_data="adm:rem"),
         InlineKeyboardButton(text="Застрявшие в FSM", callback_data="adm:fsm"),
     )
+    b.row(InlineKeyboardButton(text="Ссылка поддержки", callback_data="adm:support"))
     b.row(InlineKeyboardButton(text="Статистика", callback_data="adm:stats"))
     b.row(InlineKeyboardButton(text="Закрыть", callback_data="adm:close"))
     return b
@@ -89,6 +91,7 @@ _MAIN_TEXT = (
     "· <b>Промокоды</b> — создать/включить/выключить коды\n"
     "· <b>Напоминания</b> — пороги и единица напоминаний о продлении\n"
     "· <b>Застрявшие в FSM</b> — кто на каком шаге сценария\n"
+    "· <b>Ссылка поддержки</b> — куда ведёт кнопка «Перейти» в разделе «Поддержка»\n"
     "· <b>Статистика</b> — занятые места и текущая ставка\n\n"
     "Выбери раздел:"
 )
@@ -1192,6 +1195,82 @@ async def adm_rem_offset_set(message: Message, state: FSMContext, pool: asyncpg.
     await state.clear()
     logger.info(f"⚙️ Админ: порог напоминания {kind} = {raw}")
     text, b = await _rem_view(pool)
+    await message.answer(text, reply_markup=b.as_markup())
+
+
+# ── Ссылка поддержки (кнопка «Перейти» у пользователя) ───────────────────────
+def _normalize_support_url(raw: str) -> str | None:
+    """Приводит ввод админа к валидному URL для кнопки. None — не распознано.
+
+    @username / голый username → https://t.me/username; t.me/... → https://t.me/...;
+    http(s)://… и tg://… — оставляем как есть.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if raw.startswith(("https://", "http://", "tg://")):
+        return raw
+    if raw.startswith("t.me/"):
+        return "https://" + raw
+    if raw.startswith("@"):
+        raw = raw[1:]
+    if re.fullmatch(r"[A-Za-z0-9_]{4,32}", raw):
+        return "https://t.me/" + raw
+    return None
+
+
+async def _support_view(pool: asyncpg.Pool) -> tuple[str, InlineKeyboardBuilder]:
+    url = await app_settings.support_url(pool)
+    if url:
+        status = f"Текущая ссылка: <code>{escape(url)}</code>"
+    else:
+        status = "Ссылка не задана — кнопка «Перейти» у пользователя скрыта."
+    text = (
+        "<b>ССЫЛКА ПОДДЕРЖКИ</b>\n\n"
+        f"{status}\n\n"
+        "В разделе «Поддержка» пользователь видит кнопку, ведущую на этот аккаунт. "
+        "Применяется сразу, без рестарта."
+    )
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Изменить ссылку", callback_data="adm:supportset"))
+    b.row(InlineKeyboardButton(text="Назад", callback_data="adm:menu"))
+    return text, b
+
+
+@router.callback_query(F.data == "adm:support")
+async def adm_support(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    text, b = await _support_view(pool)
+    await _show(cb, text, b)
+
+
+@router.callback_query(F.data == "adm:supportset")
+async def adm_support_set_start(cb: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    await state.set_state(AdminStates.support_url)
+    await _show(
+        cb,
+        "Пришлите ссылку или @username аккаунта поддержки.\n"
+        "Примеры: <code>@club_support</code> или <code>https://t.me/club_support</code>",
+        _cancel_kb(),
+    )
+
+
+@router.message(AdminStates.support_url)
+async def adm_support_set(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    url = _normalize_support_url(message.text or "")
+    if not url:
+        return await message.answer(
+            "Не похоже на ссылку. Пришлите @username или ссылку вида https://t.me/…:"
+        )
+    await app_settings.set_support_url(pool, url)
+    await state.clear()
+    logger.info(f"⚙️ Админ установил ссылку поддержки: {url}")
+    text, b = await _support_view(pool)
     await message.answer(text, reply_markup=b.as_markup())
 
 

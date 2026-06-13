@@ -18,13 +18,6 @@ NAV_MYSUB = "nav:mysub"      # Моя подписка
 NAV_RENEW = "nav:renew"      # Продлить подписку
 NAV_PROMO = "nav:promo"      # Ввести промокод
 
-# ── Поддержка ────────────────────────────────────────────────────────────────
-SUP_PAYMENT = "sup:payment"
-SUP_NOACCESS = "sup:noaccess"
-SUP_QUESTION = "sup:question"
-SUP_ADMIN = "sup:admin"
-
-
 def welcome_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Вступить в клуб", callback_data=NAV_JOIN))
@@ -49,12 +42,15 @@ def rules_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def support_kb() -> InlineKeyboardMarkup:
+def support_kb(url: str | None) -> InlineKeyboardMarkup:
+    """Экран поддержки: кнопка-ссылка «Перейти» (если ссылка задана) + «Назад».
+
+    URL задаётся админом (раздел «Ссылка поддержки»). Если ссылки нет — показываем
+    только «Назад» (текст экрана при этом объясняет, что контакт уточняется).
+    """
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="Проблема с оплатой", callback_data=SUP_PAYMENT))
-    b.row(InlineKeyboardButton(text="Нет доступа к чату", callback_data=SUP_NOACCESS))
-    b.row(InlineKeyboardButton(text="Вопрос по подписке", callback_data=SUP_QUESTION))
-    b.row(InlineKeyboardButton(text="Написать администратору", callback_data=SUP_ADMIN))
+    if url:
+        b.row(InlineKeyboardButton(text="Перейти в поддержку", url=url))
     b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_START))
     return b.as_markup()
 
@@ -72,13 +68,6 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="Правила клуба", callback_data=NAV_RULES),
     )
     b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
-    return b.as_markup()
-
-
-def back_to_support_kb() -> InlineKeyboardMarkup:
-    """Кнопка возврата из экрана ввода обращения в меню поддержки."""
-    b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_SUPPORT))
     return b.as_markup()
 
 

@@ -6,11 +6,6 @@ from __future__ import annotations
 from aiogram.fsm.state import State, StatesGroup
 
 
-class SupportStates(StatesGroup):
-    # Ждём текст обращения в поддержку (тема хранится в data["topic"]).
-    waiting_message = State()
-
-
 class PromoStates(StatesGroup):
     # Ждём, пока пользователь пришлёт промокод сообщением.
     waiting_code = State()
@@ -36,3 +31,5 @@ class AdminStates(StatesGroup):
     promo_expiry = State()    # срок действия в днях (0 = бессрочно)
     # Правка порогов напоминаний на лету (единица — кнопкой). data: rem_kind.
     rem_offset = State()
+    # Ввод ссылки/username аккаунта поддержки (раздел «Ссылка поддержки»).
+    support_url = State()

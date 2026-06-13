@@ -6,19 +6,17 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from html import escape
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 import asyncpg
 
 from .. import keyboards as kb
 from .. import repo, texts
-from ..config import settings
 from ..logger import logger
-from ..states import SupportStates
+from ..services import app_settings
 
 router = Router()
 
@@ -63,57 +61,12 @@ async def nav_menu(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> 
 
 @router.callback_query(F.data == kb.NAV_SUPPORT)
 async def nav_support(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
-    await state.clear()  # выходим из возможного ожидания ввода
-    await _show(cb, pool, "support", texts.SUPPORT, kb.support_kb())
+    await state.clear()
+    # Раздел поддержки = кнопка-ссылка на аккаунт поддержки (ссылка из админки).
+    url = await app_settings.support_url(pool)
+    text = texts.SUPPORT if url else texts.SUPPORT_NO_LINK
+    await _show(cb, pool, "support", text, kb.support_kb(url or None))
 
 
 # NAV_JOIN/NAV_TARIFF — роутер tariffs (этап 2); NAV_MYSUB/NAV_RENEW — payment
 # (этапы 3/5); NAV_PROMO — роутер promo (этап 7).
-
-
-# ── Поддержка: выбор темы → ожидание текста обращения ────────────────────────
-_SUPPORT_PROMPTS = {
-    kb.SUP_PAYMENT: ("payment", texts.SUPPORT_PAYMENT),
-    kb.SUP_NOACCESS: ("noaccess", texts.SUPPORT_NOACCESS),
-    kb.SUP_QUESTION: ("question", texts.SUPPORT_QUESTION),
-    kb.SUP_ADMIN: ("admin", texts.SUPPORT_ADMIN),
-}
-
-
-@router.callback_query(F.data.in_(set(_SUPPORT_PROMPTS)))
-async def support_topic(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
-    topic, prompt = _SUPPORT_PROMPTS[cb.data]
-    await state.set_state(SupportStates.waiting_message)
-    await state.update_data(topic=topic)
-    await repo.set_fsm_state(pool, cb.from_user.id, f"support:waiting:{topic}")
-    with suppress(TelegramBadRequest):
-        await cb.message.edit_text(prompt, reply_markup=kb.back_to_support_kb())
-    await cb.answer()
-    logger.info(f"🤖 Бот → @{cb.from_user.username or '—'}: поддержка «{topic}», жду сообщение")
-
-
-@router.message(SupportStates.waiting_message)
-async def support_receive(
-    message: Message, bot: Bot, pool: asyncpg.Pool, state: FSMContext
-) -> None:
-    data = await state.get_data()
-    topic = data.get("topic", "—")
-    u = message.from_user
-
-    # Пересылаем обращение всем админам.
-    header = (
-        f"🆘 <b>Обращение в поддержку</b> ({escape(topic)})\n"
-        f"От: @{escape(u.username or '—')} (id:<code>{u.id}</code>, {escape(u.first_name or '')})\n\n"
-    )
-    body = escape(message.text or "(без текста / медиа)")
-    for admin_id in settings.admin_id_list:
-        with suppress(Exception):
-            await bot.send_message(admin_id, header + body)
-
-    await state.clear()
-    await repo.set_fsm_state(pool, u.id, "support:sent")
-    await message.answer(texts.SUPPORT_SENT, reply_markup=kb.to_menu_kb())
-    logger.info(
-        f"🤖 Бот → @{u.username or '—'}: обращение «{topic}» передано "
-        f"{len(settings.admin_id_list)} админам"
-    )
