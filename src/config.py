@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # Куда ЮKassa вернёт пользователя после оплаты. Если пусто — соберётся
     # автоматически как ссылка на бота (https://t.me/<username>).
     yookassa_return_url: str = ""
+    # Прокси для запросов к API ЮKassa (нужен, если сервер не в РФ — ЮKassa режет
+    # зарубежные IP). Пусто — напрямую. Примеры:
+    #   http://user:pass@host:port   ·   socks5://user:pass@host:port
+    yookassa_proxy: str = ""
     # Как часто опрашивать pending-платежи (минуты).
     payment_poll_interval_min: int = 1
     # Как часто проверять окончания подписок (минуты) — кик из группы + уведомление.

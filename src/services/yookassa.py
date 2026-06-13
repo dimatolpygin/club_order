@@ -35,6 +35,29 @@ def new_idempotence_key() -> str:
     return str(uuid.uuid4())
 
 
+async def _request(method: str, url: str, **kwargs) -> tuple[int, dict]:
+    """Запрос к ЮKassa, при необходимости через прокси (RU-выход для зарубежного сервера).
+
+    settings.yookassa_proxy: пусто — напрямую; http(s)://… — обычный HTTP-прокси
+    (aiohttp нативно); socks5://… — через aiohttp_socks. Возвращает (HTTP-статус, JSON).
+    asyncio.TimeoutError ловим явно — он НЕ подкласс aiohttp.ClientError.
+    """
+    proxy = settings.yookassa_proxy or None
+    connector = None
+    if proxy and proxy.lower().startswith("socks"):
+        from aiohttp_socks import ProxyConnector  # ленивый импорт — нужен только для socks
+        connector = ProxyConnector.from_url(proxy)
+    elif proxy:
+        kwargs["proxy"] = proxy
+    try:
+        async with aiohttp.ClientSession(timeout=_TIMEOUT, connector=connector) as session:
+            async with session.request(method, url, auth=_auth(), **kwargs) as resp:
+                return resp.status, await resp.json()
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        logger.error(f"ЮKassa {method} {url} сеть/таймаут: {e!r}")
+        raise YooKassaError("Сеть недоступна при обращении к ЮKassa") from e
+
+
 async def create_payment(
     *,
     amount: Decimal,
@@ -57,33 +80,17 @@ async def create_payment(
         "receipt": receipt,
     }
     headers = {"Idempotence-Key": idempotence_key}
-    try:
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.post(
-                _API_URL, json=body, headers=headers, auth=_auth()
-            ) as resp:
-                data = await resp.json()
-                if resp.status not in (200, 201):
-                    logger.error(f"ЮKassa create_payment HTTP {resp.status}: {data}")
-                    raise YooKassaError(f"Создание платежа отклонено (HTTP {resp.status})")
-                return data
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        # asyncio.TimeoutError (= TimeoutError) — таймаут ClientTimeout, он НЕ
-        # подкласс ClientError, поэтому ловим явно, иначе хендлер молча зависает.
-        logger.error(f"ЮKassa create_payment сеть/таймаут: {e!r}")
-        raise YooKassaError("Сеть недоступна при создании платежа") from e
+    status, data = await _request("POST", _API_URL, json=body, headers=headers)
+    if status not in (200, 201):
+        logger.error(f"ЮKassa create_payment HTTP {status}: {data}")
+        raise YooKassaError(f"Создание платежа отклонено (HTTP {status})")
+    return data
 
 
 async def get_payment(payment_id: str) -> dict:
     """Возвращает актуальный объект платежа по его id."""
-    try:
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.get(f"{_API_URL}/{payment_id}", auth=_auth()) as resp:
-                data = await resp.json()
-                if resp.status != 200:
-                    logger.error(f"ЮKassa get_payment HTTP {resp.status}: {data}")
-                    raise YooKassaError(f"Не удалось получить платёж (HTTP {resp.status})")
-                return data
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        logger.error(f"ЮKassa get_payment сеть/таймаут: {e!r}")
-        raise YooKassaError("Сеть недоступна при проверке платежа") from e
+    status, data = await _request("GET", f"{_API_URL}/{payment_id}")
+    if status != 200:
+        logger.error(f"ЮKassa get_payment HTTP {status}: {data}")
+        raise YooKassaError(f"Не удалось получить платёж (HTTP {status})")
+    return data
