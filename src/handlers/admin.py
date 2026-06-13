@@ -763,6 +763,10 @@ async def _process_bcast_photos(
     data = await state.get_data()
     photos = list(data.get("bcast_photos") or [])
     text = data.get("bcast_text")
+    # Загрузка (особенно альбома) занимает время — сразу показываем статус.
+    status = await messages[0].answer(
+        f"Загружаю фото в хранилище ({len(messages)} шт.), подождите…"
+    )
     added = failed = skipped = 0
     for m in messages:
         if len(photos) >= _BCAST_MAX_PHOTOS:
@@ -785,7 +789,8 @@ async def _process_bcast_photos(
         note += f" Не загрузилось: {failed}."
     if skipped:
         note += f" Превышен лимит {_BCAST_MAX_PHOTOS}, лишние пропущены."
-    await messages[0].answer(note, reply_markup=_bcast_compose_kb(len(photos)).as_markup())
+    with suppress(TelegramBadRequest):
+        await status.edit_text(note, reply_markup=_bcast_compose_kb(len(photos)).as_markup())
 
 
 async def _finalize_album(key: str, state: FSMContext, bot: Bot) -> None:
