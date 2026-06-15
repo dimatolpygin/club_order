@@ -987,15 +987,29 @@ async def adm_bcast_ready(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Po
     photos = data.get("bcast_photos") or []
     if not text and not photos:
         return await _show(cb, "Пока нечего отправлять — добавьте текст или фото.", _cancel_kb())
-    count = len(await repo.get_all_user_ids(pool))
+    n_all = len(await repo.get_audience_ids(pool, repo.AUDIENCE_ALL))
+    n_active = len(await repo.get_audience_ids(pool, repo.AUDIENCE_ACTIVE))
+    n_former = len(await repo.get_audience_ids(pool, repo.AUDIENCE_FORMER))
+    n_never = len(await repo.get_audience_ids(pool, repo.AUDIENCE_NEVER))
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text=f"Отправить всем ({count})", callback_data="adm:bcast_go"))
+    b.row(InlineKeyboardButton(
+        text=f"Всем ({n_all})", callback_data="adm:bcast_go:all"
+    ))
+    b.row(InlineKeyboardButton(
+        text=f"Активным подписчикам ({n_active})", callback_data="adm:bcast_go:active"
+    ))
+    b.row(InlineKeyboardButton(
+        text=f"Бывшим подписчикам ({n_former})", callback_data="adm:bcast_go:former"
+    ))
+    b.row(InlineKeyboardButton(
+        text=f"Запускавшим без подписки ({n_never})", callback_data="adm:bcast_go:never"
+    ))
     b.row(InlineKeyboardButton(text="Отмена", callback_data="adm:menu"))
     preview = (
         "<b>Предпросмотр рассылки</b>\n\n"
         f"Фото: {len(photos)}\n"
         f"Текст: {text if text else '—'}\n\n"
-        f"Получателей: {count}"
+        "Кому отправить:"
     )
     await _show(cb, preview, b)
 
@@ -1025,12 +1039,22 @@ async def _bcast_send_one(bot: Bot, uid: int, text: str | None, photos: list[dic
             await bot.send_media_group(uid, _bcast_media(photos, text, by_url=False))
 
 
-@router.callback_query(F.data == "adm:bcast_go")
+_AUDIENCE_NAMES = {
+    repo.AUDIENCE_ALL: "всем",
+    repo.AUDIENCE_ACTIVE: "активным подписчикам",
+    repo.AUDIENCE_FORMER: "бывшим подписчикам",
+    repo.AUDIENCE_NEVER: "запускавшим без подписки",
+}
+
+
+@router.callback_query(F.data.startswith("adm:bcast_go:"))
 async def adm_bcast_go(
     cb: CallbackQuery, state: FSMContext, bot: Bot, pool: asyncpg.Pool
 ) -> None:
     if not _is_admin(cb.from_user.id):
         return await cb.answer("Нет доступа", show_alert=True)
+    audience = cb.data.rsplit(":", 1)[1]
+    aud_name = _AUDIENCE_NAMES.get(audience, "всем")
     data = await state.get_data()
     text = data.get("bcast_text")
     photos = data.get("bcast_photos") or []
@@ -1040,9 +1064,9 @@ async def adm_bcast_go(
 
     await cb.answer("Рассылка запущена")
     with suppress(TelegramBadRequest):
-        await cb.message.edit_text("Рассылка запущена, отправляю...")
+        await cb.message.edit_text(f"Рассылка ({aud_name}) запущена, отправляю...")
 
-    user_ids = await repo.get_all_user_ids(pool)
+    user_ids = await repo.get_audience_ids(pool, audience)
     sent = blocked = failed = 0
     for uid in user_ids:
         try:
@@ -1056,13 +1080,13 @@ async def adm_bcast_go(
         # Альбом = несколько сообщений, шлём чуть медленнее, чтобы не упереться в лимиты.
         await asyncio.sleep(0.1 if photos else 0.05)
     await cb.message.answer(
-        f"<b>Рассылка завершена</b>\n\nОтправлено: {sent}\n"
+        f"<b>Рассылка завершена</b> ({aud_name})\n\nОтправлено: {sent}\n"
         f"Заблокировали бота: {blocked}\nОшибки: {failed}",
         reply_markup=_main_kb().as_markup(),
     )
     logger.info(
-        f"📣 Рассылка ({len(photos)} фото): отправлено {sent}, заблок. {blocked}, "
-        f"ошибок {failed}"
+        f"📣 Рассылка [{audience}] ({len(photos)} фото): отправлено {sent}, "
+        f"заблок. {blocked}, ошибок {failed}"
     )
 
 

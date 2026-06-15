@@ -40,6 +40,52 @@ async def get_all_user_ids(pool: asyncpg.Pool) -> list[int]:
     return [r["tg_id"] for r in rows]
 
 
+# Сегменты аудитории для рассылки.
+AUDIENCE_ALL = "all"
+AUDIENCE_ACTIVE = "active"
+AUDIENCE_FORMER = "former"
+AUDIENCE_NEVER = "never"
+
+
+async def get_audience_ids(pool: asyncpg.Pool, audience: str) -> list[int]:
+    """tg_id для рассылки по сегменту (всегда без заблокированных).
+
+    active — есть активная подписка; former — подписка была, но активной нет;
+    never — нет ни одной подписки; всё прочее — все пользователи.
+    """
+    if audience == AUDIENCE_ACTIVE:
+        sql = """
+            SELECT DISTINCT u.tg_id FROM users u
+            JOIN subscriptions s ON s.tg_id = u.tg_id
+            WHERE u.is_blocked = false
+              AND s.status = 'active' AND s.end_date > now()
+            ORDER BY u.tg_id
+        """
+    elif audience == AUDIENCE_FORMER:
+        sql = """
+            SELECT u.tg_id FROM users u
+            WHERE u.is_blocked = false
+              AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.tg_id = u.tg_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM subscriptions s
+                  WHERE s.tg_id = u.tg_id
+                    AND s.status = 'active' AND s.end_date > now()
+              )
+            ORDER BY u.tg_id
+        """
+    elif audience == AUDIENCE_NEVER:
+        sql = """
+            SELECT u.tg_id FROM users u
+            WHERE u.is_blocked = false
+              AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.tg_id = u.tg_id)
+            ORDER BY u.tg_id
+        """
+    else:  # AUDIENCE_ALL
+        sql = "SELECT tg_id FROM users WHERE is_blocked = false ORDER BY tg_id"
+    rows = await pool.fetch(sql)
+    return [r["tg_id"] for r in rows]
+
+
 async def set_user_blocked(pool: asyncpg.Pool, tg_id: int, blocked: bool) -> None:
     await pool.execute(
         "UPDATE users SET is_blocked = $2, updated_at = now() WHERE tg_id = $1",
