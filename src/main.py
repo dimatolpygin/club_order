@@ -86,6 +86,7 @@ async def main() -> None:
             BotCommand(command="start", description="Главный экран"),
             BotCommand(command="menu", description="Главное меню"),
             BotCommand(command="sub", description="Статус моей подписки"),
+            BotCommand(command="id", description="Показать мой Telegram ID"),
         ])
         me = await bot.get_me()
         scheduler.start()

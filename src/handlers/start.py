@@ -24,6 +24,16 @@ async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> 
     logger.info(f"🤖 Бот → @{u.username or '—'}: приветствие /start")
 
 
+@router.message(Command("id"))
+async def cmd_id(message: Message) -> None:
+    u = message.from_user
+    lines = [f"Ваш Telegram ID: <code>{u.id}</code>"]
+    if message.chat.type != "private":
+        lines.append(f"ID этого чата: <code>{message.chat.id}</code>")
+    await message.answer("\n".join(lines))
+    logger.info(f"🤖 Бот → @{u.username or '—'}: /id ({u.id})")
+
+
 @router.message(Command("menu"))
 async def cmd_menu(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
