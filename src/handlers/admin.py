@@ -55,7 +55,7 @@ def _main_kb() -> InlineKeyboardBuilder:
     b.row(InlineKeyboardButton(text="Промокоды", callback_data="adm:promos"))
     b.row(
         InlineKeyboardButton(text="Напоминания", callback_data="adm:rem"),
-        InlineKeyboardButton(text="Застрявшие в FSM", callback_data="adm:fsm"),
+        InlineKeyboardButton(text="Кто на каком экране", callback_data="adm:fsm"),
     )
     b.row(InlineKeyboardButton(text="Ссылка поддержки", callback_data="adm:support"))
     b.row(
@@ -96,7 +96,7 @@ _MAIN_TEXT = (
     "· <b>Рассылка</b> — сообщение всем пользователям базы\n"
     "· <b>Промокоды</b> — создать/включить/выключить коды\n"
     "· <b>Напоминания</b> — пороги и единица напоминаний о продлении\n"
-    "· <b>Застрявшие в FSM</b> — кто на каком шаге сценария\n"
+    "· <b>Кто на каком экране</b> — последний экран каждого пользователя\n"
     "· <b>Ссылка поддержки</b> — куда ведёт кнопка «Перейти» в разделе «Поддержка»\n"
     "· <b>Администраторы</b> — открыть доступ к /admin другому человеку по ID\n"
     "· <b>Статистика</b> — занятые места и текущая ставка\n\n"
@@ -1423,7 +1423,7 @@ async def adm_support_set(message: Message, state: FSMContext, pool: asyncpg.Poo
     await message.answer(text, reply_markup=b.as_markup())
 
 
-# ── Застрявшие в FSM ─────────────────────────────────────────────────────────
+# ── Кто на каком экране (последний шаг сценария) ──────────────────────────────
 def _ago(dt: datetime, now: datetime) -> str:
     secs = max(0, int((now - dt).total_seconds()))
     if secs < 3600:
@@ -1433,6 +1433,35 @@ def _ago(dt: datetime, now: datetime) -> str:
     return f"{secs // 86400} дн назад"
 
 
+# Человеческие подписи экранов (коды state из repo.set_fsm_state).
+_FSM_LABELS = {
+    "screen:start": "Главный экран (/start)",
+    "screen:menu": "Главное меню",
+    "screen:about": "Что внутри клуба",
+    "screen:rules": "Правила участия",
+    "screen:support": "Поддержка",
+    "screen:tariffs": "Выбор тарифа",
+    "screen:renew": "Продление подписки",
+    "screen:mysub": "Моя подписка",
+    "screen:pay:pending": "Оплата — ожидание оплаты",
+    "screen:pay:success": "Оплата — успех",
+    "screen:pay:canceled": "Оплата — отменена",
+    "screen:promo": "Ввод промокода",
+    "screen:promo:applied": "Промокод применён (выбор срока)",
+}
+
+
+def _fsm_label(state: str | None) -> str:
+    """Человекочитаемое название экрана по коду state. Неизвестное — как есть."""
+    if not state:
+        return "—"
+    if state in _FSM_LABELS:
+        return _FSM_LABELS[state]
+    if state.startswith("screen:summary:"):
+        return "Оформление заказа (сводка)"
+    return escape(state)
+
+
 @router.callback_query(F.data == "adm:fsm")
 async def adm_fsm(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(cb.from_user.id):
@@ -1440,8 +1469,10 @@ async def adm_fsm(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     rows = await repo.get_fsm_stuck(pool)
     now = datetime.now(timezone.utc)
     lines = [
-        "<b>ЗАСТРЯВШИЕ В FSM</b>",
-        "<i>Последний шаг сценария у пользователей (свежие сверху).</i>",
+        "<b>КТО НА КАКОМ ЭКРАНЕ</b>",
+        "<i>Последний экран, на котором пользователь остановился (свежие сверху). "
+        "Чем больше «назад» — тем дольше человек не возвращался. Полную историю "
+        "нажатий смотри в логах сервера.</i>",
         "",
     ]
     if not rows:
@@ -1449,9 +1480,10 @@ async def adm_fsm(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     for r in rows:
         uname = f"@{escape(r['username'])}" if r["username"] else "—"
         name = escape(r["first_name"] or "")
+        head = f"{uname} {name}".strip()
         lines.append(
-            f"<code>{r['tg_id']}</code> {uname} {name} · "
-            f"<b>{escape(r['state'] or '')}</b> · {_ago(r['updated_at'], now)}"
+            f"· <b>{_fsm_label(r['state'])}</b> — {head} "
+            f"(<code>{r['tg_id']}</code>) · {_ago(r['updated_at'], now)}"
         )
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Обновить", callback_data="adm:fsm"))
