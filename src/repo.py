@@ -88,6 +88,43 @@ async def get_fsm_stuck(pool: asyncpg.Pool, limit: int = 30) -> list[asyncpg.Rec
     )
 
 
+async def add_event(pool: asyncpg.Pool, tg_id: int, event: str, keep: int = 50) -> None:
+    """Пишет действие пользователя в журнал user_events (для просмотра пути).
+
+    Самоограничение роста: после вставки удаляет всё, кроме последних `keep`
+    записей этого пользователя. Не должна ронять обработку апдейта — вызывающий
+    оборачивает в try/except.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "INSERT INTO user_events(tg_id, event) VALUES($1, $2)", tg_id, event
+            )
+            await conn.execute(
+                """
+                DELETE FROM user_events
+                WHERE tg_id = $1 AND id NOT IN (
+                    SELECT id FROM user_events
+                    WHERE tg_id = $1 ORDER BY id DESC LIMIT $2
+                )
+                """,
+                tg_id,
+                keep,
+            )
+
+
+async def get_user_events(
+    pool: asyncpg.Pool, tg_id: int, limit: int = 20
+) -> list[asyncpg.Record]:
+    """Последние действия пользователя (свежие сверху) — для раздела «История»."""
+    return await pool.fetch(
+        "SELECT event, created_at FROM user_events "
+        "WHERE tg_id = $1 ORDER BY id DESC LIMIT $2",
+        tg_id,
+        limit,
+    )
+
+
 async def set_fsm_state(pool: asyncpg.Pool, tg_id: int, state: str | None) -> None:
     """Фиксирует текущее FSM-состояние пользователя (чтобы видеть, где застрял).
 

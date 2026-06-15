@@ -766,8 +766,36 @@ def _card_kb(tg_id: int, has_active: bool) -> InlineKeyboardBuilder:
         b.row(InlineKeyboardButton(
             text="Аннулировать подписку", callback_data=f"adm:cancelsub:{tg_id}"
         ))
+    b.row(InlineKeyboardButton(
+        text="История действий", callback_data=f"adm:journey:{tg_id}"
+    ))
     b.row(InlineKeyboardButton(text="В меню", callback_data="adm:menu"))
     return b
+
+
+@router.callback_query(F.data.startswith("adm:journey:"))
+async def adm_journey(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    tg_id = int(cb.data.rsplit(":", 1)[1])
+    rows = await repo.get_user_events(pool, tg_id, limit=20)
+    now = datetime.now(timezone.utc)
+    lines = [
+        f"<b>ИСТОРИЯ ДЕЙСТВИЙ</b> <code>{tg_id}</code>",
+        "<i>Что нажимал пользователь (свежее сверху, последние 20).</i>",
+        "",
+    ]
+    if not rows:
+        lines.append("Пока нет записей (действия пишутся с момента включения истории).")
+    for r in rows:
+        lines.append(f"· {escape(r['event'])} — {_ago(r['created_at'], now)}")
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Обновить", callback_data=f"adm:journey:{tg_id}"))
+    b.row(
+        InlineKeyboardButton(text="К карточке", callback_data=f"adm:card:{tg_id}"),
+        InlineKeyboardButton(text="В меню", callback_data="adm:menu"),
+    )
+    await _show(cb, "\n".join(lines), b)
 
 
 @router.callback_query(F.data == "adm:findstart")
