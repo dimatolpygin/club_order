@@ -17,7 +17,7 @@ from .db import close_pool, init_pool
 from .handlers import get_main_router
 from .logger import setup_logging
 from .middlewares import LoggingMiddleware
-from .services import payments, reminders, subscriptions
+from .services import app_settings, payments, reminders, subscriptions
 
 
 async def main() -> None:
@@ -26,6 +26,12 @@ async def main() -> None:
 
     pool = await init_pool()
     redis = await init_redis()
+
+    # Доп-администраторы (добавленные из админки) — в in-memory кеш, чтобы
+    # проверка прав оставалась синхронной.
+    extra_admins = await app_settings.load_extra_admins(pool)
+    if extra_admins:
+        log.info(f"Доп-администраторы из БД: {sorted(extra_admins)}")
 
     # FSM-состояния храним в Redis. parse_mode=HTML включён глобально.
     storage = RedisStorage.from_url(settings.redis_url)

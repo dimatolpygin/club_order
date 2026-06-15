@@ -36,7 +36,10 @@ router = Router()
 
 
 def _is_admin(user_id: int | None) -> bool:
-    return user_id is not None and user_id in settings.admin_id_list
+    return user_id is not None and (
+        user_id in settings.admin_id_list
+        or user_id in app_settings.extra_admin_ids()
+    )
 
 
 # ── Клавиатуры панели ────────────────────────────────────────────────────────
@@ -55,7 +58,10 @@ def _main_kb() -> InlineKeyboardBuilder:
         InlineKeyboardButton(text="Застрявшие в FSM", callback_data="adm:fsm"),
     )
     b.row(InlineKeyboardButton(text="Ссылка поддержки", callback_data="adm:support"))
-    b.row(InlineKeyboardButton(text="Статистика", callback_data="adm:stats"))
+    b.row(
+        InlineKeyboardButton(text="Администраторы", callback_data="adm:admins"),
+        InlineKeyboardButton(text="Статистика", callback_data="adm:stats"),
+    )
     b.row(InlineKeyboardButton(text="Закрыть", callback_data="adm:close"))
     return b
 
@@ -92,6 +98,7 @@ _MAIN_TEXT = (
     "· <b>Напоминания</b> — пороги и единица напоминаний о продлении\n"
     "· <b>Застрявшие в FSM</b> — кто на каком шаге сценария\n"
     "· <b>Ссылка поддержки</b> — куда ведёт кнопка «Перейти» в разделе «Поддержка»\n"
+    "· <b>Администраторы</b> — открыть доступ к /admin другому человеку по ID\n"
     "· <b>Статистика</b> — занятые места и текущая ставка\n\n"
     "Выбери раздел:"
 )
@@ -129,6 +136,112 @@ async def adm_close(cb: CallbackQuery, state: FSMContext) -> None:
     with suppress(TelegramBadRequest):
         await cb.message.edit_text("Панель закрыта. /admin — открыть снова.")
     await cb.answer()
+
+
+# ── Администраторы (доступ к /admin по tg_id) ────────────────────────────────
+async def _admins_menu(cb: CallbackQuery) -> None:
+    env_ids = settings.admin_id_list
+    extra = sorted(app_settings.extra_admin_ids())
+    lines = [
+        "<b>АДМИНИСТРАТОРЫ</b>",
+        "Доступ к команде /admin.",
+        "",
+        "<b>Основные</b> (из настроек сервера, здесь не удаляются):",
+    ]
+    lines += [f"· <code>{i}</code>" for i in env_ids] if env_ids else ["· —"]
+    lines += ["", "<b>Добавленные</b>:"]
+    b = InlineKeyboardBuilder()
+    if extra:
+        for i in extra:
+            lines.append(f"· <code>{i}</code>")
+            b.row(InlineKeyboardButton(
+                text=f"Удалить {i}", callback_data=f"adm:admindel:{i}"
+            ))
+    else:
+        lines.append("· пока никого")
+    b.row(InlineKeyboardButton(text="Добавить по ID", callback_data="adm:adminadd"))
+    b.row(InlineKeyboardButton(text="Назад", callback_data="adm:menu"))
+    await _show(cb, "\n".join(lines), b)
+
+
+@router.callback_query(F.data == "adm:admins")
+async def adm_admins(cb: CallbackQuery) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    await _admins_menu(cb)
+
+
+@router.callback_query(F.data == "adm:adminadd")
+async def adm_admin_add_start(cb: CallbackQuery, state: FSMContext) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    await state.set_state(AdminStates.admin_add_id)
+    await _show(
+        cb,
+        "Пришлите числовой Telegram ID человека, которому открыть доступ к /admin.\n\n"
+        "Свой ID человек может узнать у @userinfobot. После добавления он сразу "
+        "сможет пользоваться /admin.",
+        _cancel_kb(),
+    )
+
+
+@router.message(AdminStates.admin_add_id)
+async def adm_admin_add_id(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or int(raw) <= 0:
+        return await message.answer("Это не похоже на ID. Пришлите положительное число:")
+    tg_id = int(raw)
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="К администраторам", callback_data="adm:admins"))
+    b.row(InlineKeyboardButton(text="В меню", callback_data="adm:menu"))
+    if tg_id in settings.admin_id_list:
+        await state.clear()
+        return await message.answer(
+            f"<code>{tg_id}</code> уже основной администратор.",
+            reply_markup=b.as_markup(),
+        )
+    if tg_id in app_settings.extra_admin_ids():
+        await state.clear()
+        return await message.answer(
+            f"<code>{tg_id}</code> уже в списке администраторов.",
+            reply_markup=b.as_markup(),
+        )
+    await app_settings.add_extra_admin(pool, tg_id)
+    await state.clear()
+    logger.info(f"⚙️ Админ {message.from_user.id} открыл доступ к /admin для {tg_id}")
+    await message.answer(
+        f"Готово. <code>{tg_id}</code> получил доступ к /admin.",
+        reply_markup=b.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("adm:admindel:"))
+async def adm_admin_del_confirm(cb: CallbackQuery) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    tg_id = int(cb.data.rsplit(":", 1)[1])
+    if tg_id not in app_settings.extra_admin_ids():
+        return await _admins_menu(cb)
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="Да, убрать", callback_data=f"adm:admindelyes:{tg_id}"
+    ))
+    b.row(InlineKeyboardButton(text="Назад", callback_data="adm:admins"))
+    await _show(cb, f"Убрать доступ к /admin у <code>{tg_id}</code>?", b)
+
+
+@router.callback_query(F.data.startswith("adm:admindelyes:"))
+async def adm_admin_del_do(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    tg_id = int(cb.data.rsplit(":", 1)[1])
+    await app_settings.remove_extra_admin(pool, tg_id)
+    logger.info(f"⚙️ Админ {cb.from_user.id} убрал доступ к /admin у {tg_id}")
+    await _admins_menu(cb)
 
 
 # ── Ступени ──────────────────────────────────────────────────────────────────

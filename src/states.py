@@ -33,3 +33,5 @@ class AdminStates(StatesGroup):
     rem_offset = State()
     # Ввод ссылки/username аккаунта поддержки (раздел «Ссылка поддержки»).
     support_url = State()
+    # Ввод tg_id нового администратора (раздел «Администраторы»).
+    admin_add_id = State()
