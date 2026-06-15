@@ -944,16 +944,19 @@ def _promo_desc(p) -> str:
 
 async def _promos_menu(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     promos = await repo.get_all_promos(pool)
-    lines = ["<b>ПРОМОКОДЫ</b>", "Нажми на код, чтобы включить/выключить.", ""]
+    lines = ["<b>ПРОМОКОДЫ</b>", "Слева — вкл/выкл, справа — удалить.", ""]
     b = InlineKeyboardBuilder()
     if not promos:
         lines.append("<i>Пока нет ни одного промокода.</i>")
     for p in promos:
         lines.append(f"#{p['id']} <code>{escape(p['code'])}</code> — {_promo_desc(p)}")
         mark = "✓" if p["is_active"] else "✕"
-        b.row(InlineKeyboardButton(
-            text=f"{mark} {p['code']}", callback_data=f"adm:ptoggle:{p['id']}"
-        ))
+        b.row(
+            InlineKeyboardButton(
+                text=f"{mark} {p['code']}", callback_data=f"adm:ptoggle:{p['id']}"
+            ),
+            InlineKeyboardButton(text="Удалить", callback_data=f"adm:pdel:{p['id']}"),
+        )
     b.row(InlineKeyboardButton(text="Создать промокод", callback_data="adm:promonew"))
     b.row(InlineKeyboardButton(text="Назад", callback_data="adm:menu"))
     await _show(cb, "\n".join(lines), b)
@@ -975,6 +978,39 @@ async def adm_promo_toggle(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     if p is not None:
         await repo.set_promo_active(pool, promo_id, not p["is_active"])
         logger.info(f"⚙️ Админ: промокод #{promo_id} active={not p['is_active']}")
+    await _promos_menu(cb, pool)
+
+
+@router.callback_query(F.data.startswith("adm:pdel:"))
+async def adm_promo_del_confirm(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    p = await repo.get_promo(pool, promo_id)
+    if p is None:
+        return await _promos_menu(cb, pool)
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Да, удалить", callback_data=f"adm:pdelyes:{promo_id}"))
+    b.row(InlineKeyboardButton(text="Назад", callback_data="adm:promos"))
+    await _show(
+        cb,
+        f"Удалить промокод <code>{escape(p['code'])}</code>?\n\n"
+        "Код исчезнет из списка, применить его больше будет нельзя. История его "
+        "активаций удалится, в платежах ссылка на код обнулится (сами платежи "
+        "сохранятся). Уже оформленные по нему подписки не затрагиваются.\n\n"
+        "Если код нужно просто временно отключить — вернись и нажми вкл/выкл.",
+        b,
+    )
+
+
+@router.callback_query(F.data.startswith("adm:pdelyes:"))
+async def adm_promo_del_do(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    if not _is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    promo_id = int(cb.data.rsplit(":", 1)[1])
+    deleted = await repo.delete_promo(pool, promo_id)
+    if deleted:
+        logger.info(f"⚙️ Админ удалил промокод #{promo_id}")
     await _promos_menu(cb, pool)
 
 

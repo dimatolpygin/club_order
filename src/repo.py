@@ -567,6 +567,18 @@ async def set_promo_active(pool: asyncpg.Pool, promo_id: int, is_active: bool) -
     return row is not None
 
 
+async def delete_promo(pool: asyncpg.Pool, promo_id: int) -> bool:
+    """Удаляет промокод. Связанные записи об активациях (promo_redemptions)
+    удаляются каскадом (ON DELETE CASCADE); ссылка в payments.promo_id обнуляется
+    (ON DELETE SET NULL) — история платежей сохраняется. Уже оформленные по коду
+    подписки не затрагиваются (цена уже зафиксирована). True — если строка удалена.
+    """
+    row = await pool.fetchrow(
+        "DELETE FROM promo_codes WHERE id = $1 RETURNING id", promo_id
+    )
+    return row is not None
+
+
 async def user_redeemed_promo(pool: asyncpg.Pool, promo_id: int, tg_id: int) -> bool:
     """Применял ли уже этот пользователь данный промокод (успешно)."""
     row = await pool.fetchrow(
