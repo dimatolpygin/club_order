@@ -146,10 +146,12 @@ html, body {
 .input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); }
 
 .btn {
+  display: inline-flex; align-items: center; justify-content: center;
   height: 42px; padding: 0 18px;
   border: 1px solid transparent; border-radius: 10px;
-  font-size: 15px; font-weight: 600; cursor: pointer;
-  font-family: inherit;
+  font-size: 15px; font-weight: 600; line-height: 1; cursor: pointer;
+  font-family: inherit; text-align: center; text-decoration: none;
+  box-sizing: border-box;
   align-self: flex-start;
 }
 .btn-primary { background: var(--blue); color: #fff; }
@@ -208,10 +210,10 @@ html, body {
 .table tr:last-child td { border-bottom: none; }
 .table tr.row-hidden td { opacity: .55; }
 .nowrap { white-space: nowrap; }
-.cell-prices { display: flex; flex-wrap: wrap; gap: 5px; }
+.cell-prices { display: flex; flex-wrap: wrap; gap: 5px; max-width: 300px; }
 .actions { display: flex; gap: 7px; }
 
-.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.badge { display: inline-flex; align-items: center; justify-content: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.2; white-space: nowrap; }
 .badge-blue { background: #eaf0fe; color: var(--blue-ink); }
 .badge-green { background: #e9f7ee; color: #15803d; }
 .pill {

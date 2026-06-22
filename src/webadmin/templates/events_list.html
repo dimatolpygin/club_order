@@ -40,8 +40,8 @@
           {% if e.subscriber_discount_percent %}<span class="pill">скидка подписчику {{ e.subscriber_discount_percent }}%</span>{% endif %}
         </td>
         <td class="nowrap">{{ seats_cell(e) }}</td>
-        <td class="cell-prices">{{ price_summary(e.id) }}</td>
-        <td>{% if e.is_active %}<span class="dot-ok"></span> в боте{% else %}<span class="dot-off"></span> скрыто{% endif %}</td>
+        <td><div class="cell-prices">{{ price_summary(e.id) }}</div></td>
+        <td class="nowrap">{% if e.is_active %}<span class="dot-ok"></span> в боте{% else %}<span class="dot-off"></span> скрыто{% endif %}</td>
         <td class="nowrap actions">
           <a class="btn btn-light btn-sm" href="/events/{{ e.id }}/edit">Изменить</a>
           <form method="post" action="/events/{{ e.id }}/delete" class="inline"
