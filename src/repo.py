@@ -415,6 +415,34 @@ async def set_user_email(pool: asyncpg.Pool, tg_id: int, email: str) -> None:
     )
 
 
+# ── Мероприятия (events) — раздел «Мероприятия» в боте (этап 13) ──────────────
+_EVENT_COLS = (
+    "id, kind, title, starts_at, gender_balance, seats_total, seats_male, "
+    "seats_female, show_in_advance, subscriber_discount_percent, address, "
+    "rules_text, is_active"
+)
+
+
+async def list_events(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Все события (фильтрация по правилам показа — в services.events)."""
+    return await pool.fetch(f"SELECT {_EVENT_COLS} FROM events ORDER BY starts_at")
+
+
+async def get_event(pool: asyncpg.Pool, event_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        f"SELECT {_EVENT_COLS} FROM events WHERE id = $1", event_id
+    )
+
+
+async def get_event_prices(pool: asyncpg.Pool, event_id: int) -> dict[str, int]:
+    """Цены по типам билетов события: {ticket_type: price}."""
+    rows = await pool.fetch(
+        "SELECT ticket_type, price FROM event_ticket_prices WHERE event_id = $1",
+        event_id,
+    )
+    return {r["ticket_type"]: r["price"] for r in rows}
+
+
 # ── Платежи (payments) ───────────────────────────────────────────────────────
 async def create_payment(
     pool: asyncpg.Pool,

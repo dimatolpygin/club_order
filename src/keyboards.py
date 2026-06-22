@@ -17,10 +17,17 @@ NAV_TARIFF = "nav:tariff"    # Выбрать тариф
 NAV_MYSUB = "nav:mysub"      # Моя подписка
 NAV_RENEW = "nav:renew"      # Продлить подписку
 NAV_PROMO = "nav:promo"      # Ввести промокод
+NAV_EVENTS = "nav:events"    # Мероприятия (билеты «Фокус.Энергия», этап 13)
+
+# Префиксы callback'ов раздела мероприятий.
+EVT_OPEN = "evt"             # evt:{event_id} — открыть карточку события
+EVT_BUY = "evtbuy"           # evtbuy:{event_id}:{ticket_type} — выбрать билет
+EVT_FULL = "evtfull"         # тап по типу без мест — попап «Мест нет»
 
 def welcome_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Вступить в клуб", callback_data=NAV_JOIN))
+    b.row(InlineKeyboardButton(text="Мероприятия", callback_data=NAV_EVENTS))
     b.row(InlineKeyboardButton(text="Что внутри клуба", callback_data=NAV_ABOUT))
     b.row(InlineKeyboardButton(text="Правила участия", callback_data=NAV_RULES))
     b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
@@ -63,6 +70,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="Продлить", callback_data=NAV_RENEW),
     )
     b.row(InlineKeyboardButton(text="Ввести промокод", callback_data=NAV_PROMO))
+    b.row(InlineKeyboardButton(text="Мероприятия", callback_data=NAV_EVENTS))
     b.row(
         InlineKeyboardButton(text="Что внутри клуба", callback_data=NAV_ABOUT),
         InlineKeyboardButton(text="Правила клуба", callback_data=NAV_RULES),
@@ -132,4 +140,69 @@ def to_menu_kb() -> InlineKeyboardMarkup:
     """Кнопка в главное меню (для заглушек и подтверждений)."""
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
+    return b.as_markup()
+
+
+# ── Мероприятия (этап 13) ────────────────────────────────────────────────────
+def events_list_kb(events: list) -> InlineKeyboardMarkup:
+    """Список событий: по кнопке на событие (название · дата) + «Назад» в меню."""
+    b = InlineKeyboardBuilder()
+    for e in events:
+        b.row(
+            InlineKeyboardButton(
+                text=f"{e['title']} · {e['starts_at']:%d.%m}",
+                callback_data=f"{EVT_OPEN}:{e['id']}",
+            )
+        )
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_MENU))
+    return b.as_markup()
+
+
+def event_tickets_kb(
+    event_id: int, items: list[tuple[str, int, bool]]
+) -> InlineKeyboardMarkup:
+    """Меню типов билетов события.
+
+    `items` — `(ticket_type, price, available)` из services.events.seat_availability.
+    Доступный тип → переход к покупке; без мест → попап «Мест нет» (EVT_FULL).
+    """
+    from .services import events as ev
+    from .utils import fmt_price
+
+    b = InlineKeyboardBuilder()
+    for ttype, price, available in items:
+        label = ev.ticket_label(ttype)
+        if available:
+            b.row(
+                InlineKeyboardButton(
+                    text=f"{label} — {fmt_price(price)} ₽",
+                    callback_data=f"{EVT_BUY}:{event_id}:{ttype}",
+                )
+            )
+        else:
+            b.row(
+                InlineKeyboardButton(
+                    text=f"{label} — мест нет",
+                    callback_data=EVT_FULL,
+                )
+            )
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_EVENTS))
+    return b.as_markup()
+
+
+def event_sold_out_kb(support_url: str | None) -> InlineKeyboardMarkup:
+    """Событие распродано: «Запрос в Поддержку» (если ссылка задана) + «Назад»."""
+    b = InlineKeyboardBuilder()
+    if support_url:
+        b.row(InlineKeyboardButton(text="Запрос в Поддержку", url=support_url))
+    else:
+        b.row(InlineKeyboardButton(text="Запрос в Поддержку", callback_data=NAV_SUPPORT))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_EVENTS))
+    return b.as_markup()
+
+
+def event_ticket_summary_kb(event_id: int) -> InlineKeyboardMarkup:
+    """Сводка по выбранному билету (оплата — этап 14): «Назад» к билетам события."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Назад", callback_data=f"{EVT_OPEN}:{event_id}"))
     return b.as_markup()
