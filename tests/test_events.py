@@ -132,6 +132,32 @@ def main() -> None:
     check("меню: мужских мест 0 → male недоступен, female доступен",
           [(t, a) for t, _, a in items_sold], [("male", False), ("female", True)])
 
+    # ── Занятость по проданным билетам (этап 14) ──────────────────────────────
+    check("занятость: пусто → нули",
+          ev.seats_occupied({}), {"male": 0, "female": 0, "total": 0})
+    # 1 мужской + 1 женский + 1 парный М+Ж = 2М, 2Ж, 4 общих места.
+    check("занятость: одиночные + пара М+Ж",
+          ev.seats_occupied({"male": 1, "female": 1, "pair_mf": 1}),
+          {"male": 2, "female": 2, "total": 4})
+    # 2 парных М+М = 4 мужских места; пара Ж+Ж = 2 женских.
+    check("занятость: парные М+М и Ж+Ж",
+          ev.seats_occupied({"pair_mm": 2, "pair_ff": 1}),
+          {"male": 4, "female": 2, "total": 6})
+
+    # Учёт занятости в доступности: общий пул 4, занято 3 (пара+одиночка) → пара не лезет.
+    pooled4 = make_event(gender_balance=False, seats_total=4)
+    occ = ev.seats_occupied({"pair_mf": 1, "male": 1})  # total=3
+    check("доступность с занятостью: 1 место свободно → одиночный да, пара нет",
+          (ev.has_seats(pooled4, "female", occ), ev.has_seats(pooled4, "pair_ff", occ)),
+          (True, False))
+
+    # Раздельно: 2М/2Ж, занят 1 парный М+Ж (1М+1Ж) → ещё по одному месту каждого пола.
+    g2 = make_event(gender_balance=True, seats_total=None, seats_male=2, seats_female=2)
+    occ2 = ev.seats_occupied({"pair_mf": 1})
+    check("доступность раздельно с занятостью: остаётся 1М+1Ж",
+          (ev.has_seats(g2, "male", occ2), ev.has_seats(g2, "pair_mm", occ2)),
+          (True, False))
+
     print("\nВсе проверки пройдены.")
 
 

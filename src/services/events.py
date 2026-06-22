@@ -139,6 +139,22 @@ def has_seats(
     return free_m >= need_m and free_f >= need_f
 
 
+def seats_occupied(counts: Mapping[str, int]) -> dict[str, int]:
+    """Занятые места по проданным билетам: {male, female, total}.
+
+    `counts` — число билетов по типам ({ticket_type: count}). Парный билет
+    занимает 2 места (М+Ж = 1М+1Ж, Ж+Ж = 2Ж, М+М = 2М), одиночный — 1 место
+    своего пола. `total` — сумма для событий с общим пулом мест.
+    """
+    male = female = total = 0
+    for ttype, c in counts.items():
+        nm, nf, ntot = _required_seats(ttype)
+        male += c * nm
+        female += c * nf
+        total += c * ntot
+    return {"male": male, "female": female, "total": total}
+
+
 def seat_availability(
     event: Mapping[str, Any],
     prices: Mapping[str, int],

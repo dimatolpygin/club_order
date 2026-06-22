@@ -23,6 +23,10 @@ NAV_EVENTS = "nav:events"    # Мероприятия (билеты «Фокус
 EVT_OPEN = "evt"             # evt:{event_id} — открыть карточку события
 EVT_BUY = "evtbuy"           # evtbuy:{event_id}:{ticket_type} — выбрать билет
 EVT_FULL = "evtfull"         # тап по типу без мест — попап «Мест нет»
+# Оплата билета и выдача (этап 14).
+TPAY_CREATE = "tpay:create"  # tpay:create:{event_id}:{ticket_type} — создать платёж
+TPAY_CHECK = "tpay:check"    # tpay:check:{yk_id} — проверить оплату билета
+TAGREE = "tagree"            # tagree:{ticket_id} — согласие с правилами → адрес
 
 def welcome_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
@@ -206,8 +210,41 @@ def event_sold_out_kb(support_url: str | None) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def event_ticket_summary_kb(event_id: int) -> InlineKeyboardMarkup:
-    """Сводка по выбранному билету (оплата — этап 14): «Назад» к билетам события."""
+def event_ticket_summary_kb(event_id: int, ticket_type: str) -> InlineKeyboardMarkup:
+    """Сводка по выбранному билету: «Перейти к оплате» + «Назад» к билетам события."""
     b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="Перейти к оплате",
+        callback_data=f"{TPAY_CREATE}:{event_id}:{ticket_type}",
+    ))
     b.row(InlineKeyboardButton(text="Назад", callback_data=f"{EVT_OPEN}:{event_id}"))
+    return b.as_markup()
+
+
+def ticket_pay_kb(confirmation_url: str | None, yk_id: str, event_id: int) -> InlineKeyboardMarkup:
+    """Экран оплаты билета: «Оплатить» (ссылка) + «Проверить оплату» + «Отмена»."""
+    b = InlineKeyboardBuilder()
+    if confirmation_url:
+        b.row(InlineKeyboardButton(text="Оплатить", url=confirmation_url))
+    b.row(InlineKeyboardButton(text="Проверить оплату", callback_data=f"{TPAY_CHECK}:{yk_id}"))
+    b.row(InlineKeyboardButton(text="Отмена", callback_data=f"{EVT_OPEN}:{event_id}"))
+    return b.as_markup()
+
+
+def ticket_rules_kb(ticket_id: int) -> InlineKeyboardMarkup:
+    """Экран правил после оплаты: согласие (→ адрес) + «Есть вопросы» (поддержка)."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="С правилами согласен (показать адрес)",
+        callback_data=f"{TAGREE}:{ticket_id}",
+    ))
+    b.row(InlineKeyboardButton(text="Есть вопросы", callback_data=NAV_SUPPORT))
+    return b.as_markup()
+
+
+def ticket_address_kb() -> InlineKeyboardMarkup:
+    """После показа адреса: к списку мероприятий + в главное меню."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="К мероприятиям", callback_data=NAV_EVENTS))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
     return b.as_markup()

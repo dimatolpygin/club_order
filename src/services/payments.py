@@ -344,13 +344,22 @@ async def _notify_success(bot: Bot, tg_id: int, sub: asyncpg.Record | None) -> N
 
 
 async def poll_pending(pool: asyncpg.Pool, bot: Bot) -> None:
-    """Фоновый проход поллера по всем pending-платежам."""
+    """Фоновый проход поллера по всем pending-платежам.
+
+    Диспетчеризация по kind: билеты (kind='ticket') синкаются через
+    services.tickets, подписки/продления/промо — через sync_payment.
+    """
+    from . import tickets as tickets_service
+
     pending = await repo.get_pending_payments(pool)
     if not pending:
         return
     logger.info(f"🔄 Поллер: проверяю {len(pending)} pending-платеж(ей)")
     for p in pending:
         try:
-            await sync_payment(pool, bot, p)
+            if p["kind"] == "ticket":
+                await tickets_service.sync_ticket_payment(pool, bot, p)
+            else:
+                await sync_payment(pool, bot, p)
         except Exception as e:  # noqa: BLE001 — один платёж не должен ронять цикл
             logger.error(f"Поллер: ошибка по yk_id={p['yookassa_payment_id']}: {e}")

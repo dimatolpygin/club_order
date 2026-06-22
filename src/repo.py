@@ -459,14 +459,17 @@ async def create_payment(
     kind: str = "new",
     unit: str = "month",
     promo_id: int | None = None,
+    event_id: int | None = None,
+    ticket_type: str | None = None,
 ) -> int:
     row = await pool.fetchrow(
         """
         INSERT INTO payments(
             yookassa_payment_id, idempotence_key, tg_id, tier_id, months, unit,
-            fixed_price, amount, confirmation_url, status, kind, promo_id
+            fixed_price, amount, confirmation_url, status, kind, promo_id,
+            event_id, ticket_type
         )
-        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         RETURNING id
         """,
         yookassa_payment_id,
@@ -481,6 +484,8 @@ async def create_payment(
         status,
         kind,
         promo_id,
+        event_id,
+        ticket_type,
     )
     return row["id"]
 
@@ -621,6 +626,103 @@ async def _record_promo_redemption(conn, pay: asyncpg.Record) -> None:
             "WHERE id = $1",
             pay["promo_id"],
         )
+
+
+# ── Билеты (tickets) — этап 14 ────────────────────────────────────────────────
+async def get_event_ticket_counts(pool: asyncpg.Pool, event_id: int) -> dict[str, int]:
+    """Число оплаченных билетов по типам для события: {ticket_type: count}."""
+    rows = await pool.fetch(
+        "SELECT ticket_type, count(*) AS c FROM tickets "
+        "WHERE event_id = $1 AND status = 'paid' GROUP BY ticket_type",
+        event_id,
+    )
+    return {r["ticket_type"]: r["c"] for r in rows}
+
+
+async def get_ticket(pool: asyncpg.Pool, ticket_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow("SELECT * FROM tickets WHERE id = $1", ticket_id)
+
+
+async def set_ticket_rules_agreed(pool: asyncpg.Pool, ticket_id: int) -> None:
+    await pool.execute(
+        "UPDATE tickets SET rules_agreed = true WHERE id = $1", ticket_id
+    )
+
+
+async def activate_ticket_payment(
+    pool: asyncpg.Pool, yk_id: str
+) -> tuple[int | None, bool, str]:
+    """Атомарно выдаёт билет по успешному платежу. Идемпотентно, без овербукинга.
+
+    Под блокировкой строки платежа (FOR UPDATE) и строки события (FOR UPDATE —
+    сериализует параллельные выдачи на одно событие) пересчитывает занятые места
+    по проданным билетам и проверяет, хватает ли мест под тип билета.
+
+    Возвращает (ticket_id, created, reason):
+      reason='created'   — билет выдан этим вызовом (уведомить пользователя);
+      reason='already'   — платёж уже выдавал билет (повтор/гонка) — без дубля;
+      reason='no_seats'  — мест не хватило (платёж помечен 'refund_due' — ручной возврат);
+      reason='no_event'  — событие удалено (платёж помечен 'refund_due');
+      reason='not_found' — платёж не найден.
+    """
+    from .services import events as ev
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            pay = await conn.fetchrow(
+                "SELECT * FROM payments WHERE yookassa_payment_id = $1 FOR UPDATE",
+                yk_id,
+            )
+            if pay is None:
+                return None, False, "not_found"
+            if pay["ticket_id"] is not None:
+                return pay["ticket_id"], False, "already"  # уже выдан — без дубля
+
+            event = await conn.fetchrow(
+                "SELECT * FROM events WHERE id = $1 FOR UPDATE", pay["event_id"]
+            )
+            if event is None:
+                await conn.execute(
+                    "UPDATE payments SET status = 'refund_due', updated_at = now() "
+                    "WHERE id = $1",
+                    pay["id"],
+                )
+                return None, False, "no_event"
+
+            rows = await conn.fetch(
+                "SELECT ticket_type, count(*) AS c FROM tickets "
+                "WHERE event_id = $1 AND status = 'paid' GROUP BY ticket_type",
+                pay["event_id"],
+            )
+            counts = {r["ticket_type"]: r["c"] for r in rows}
+            occupied = ev.seats_occupied(counts)
+            if not ev.has_seats(event, pay["ticket_type"], occupied):
+                await conn.execute(
+                    "UPDATE payments SET status = 'refund_due', updated_at = now() "
+                    "WHERE id = $1",
+                    pay["id"],
+                )
+                return None, False, "no_seats"
+
+            ticket = await conn.fetchrow(
+                """
+                INSERT INTO tickets(tg_id, event_id, ticket_type, price, status, payment_id)
+                VALUES($1, $2, $3, $4, 'paid', $5)
+                RETURNING id
+                """,
+                pay["tg_id"],
+                pay["event_id"],
+                pay["ticket_type"],
+                pay["amount"],
+                pay["id"],
+            )
+            await conn.execute(
+                "UPDATE payments SET status = 'succeeded', ticket_id = $2, "
+                "updated_at = now() WHERE id = $1",
+                pay["id"],
+                ticket["id"],
+            )
+            return ticket["id"], True, "created"
 
 
 # ── Промокоды (promo_codes / promo_redemptions, этап 7) ───────────────────────

@@ -9,7 +9,7 @@ from __future__ import annotations
 from contextlib import suppress
 from datetime import datetime, timezone
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -20,7 +20,10 @@ from .. import repo, texts
 from ..logger import logger
 from ..services import app_settings
 from ..services import events as ev
+from ..services import tickets
+from ..services.yookassa import YooKassaError
 from ..utils import fmt_price
+from .payment import _return_url
 
 router = Router()
 
@@ -111,8 +114,102 @@ async def choose_ticket(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     text = texts.event_ticket_summary(
         event["title"], ev.ticket_label(ttype), fmt_price(prices[ttype])
     )
-    await _edit(cb, text, kb.event_ticket_summary_kb(event_id))
+    await _edit(cb, text, kb.event_ticket_summary_kb(event_id, ttype))
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: выбран билет {ttype} на "
         f"«{event['title']}» — {fmt_price(prices[ttype])} ₽"
+    )
+
+
+# ── Создание платежа за билет ────────────────────────────────────────────────
+@router.callback_query(F.data.startswith(f"{kb.TPAY_CREATE}:"))
+async def ticket_pay_create(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
+    # callback: tpay:create:{event_id}:{ticket_type}
+    _, _, event_id_raw, ttype = cb.data.split(":", 3)
+    event_id = int(event_id_raw)
+    await cb.answer("Создаю платёж...")
+    try:
+        status, result = await tickets.start_ticket_payment(
+            pool,
+            tg_id=cb.from_user.id,
+            event_id=event_id,
+            ticket_type=ttype,
+            return_url=await _return_url(bot),
+        )
+    except YooKassaError:
+        await _edit(cb, texts.PAY_CREATE_FAILED, kb.to_menu_kb())
+        return
+
+    if status == "no_seats":
+        url = await app_settings.support_url(pool)
+        await _edit(cb, texts.EVENT_SOLD_OUT, kb.event_sold_out_kb(url or None))
+        return
+    if status != "ok" or result is None:
+        await _edit(cb, texts.EVENTS_NONE, kb.to_menu_kb())
+        return
+
+    await repo.set_fsm_state(pool, cb.from_user.id, "screen:ticket:pay")
+    await _edit(
+        cb,
+        texts.ticket_pay_created(fmt_price(result["amount"])),
+        kb.ticket_pay_kb(result["confirmation_url"], result["payment_id"], event_id),
+    )
+    logger.info(
+        f"🤖 Бот → @{cb.from_user.username or '—'}: ссылка на оплату билета "
+        f"{fmt_price(result['amount'])} ₽ (yk_id={result['payment_id']})"
+    )
+
+
+# ── Проверка оплаты билета вручную ───────────────────────────────────────────
+@router.callback_query(F.data.startswith(f"{kb.TPAY_CHECK}:"))
+async def ticket_pay_check(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
+    yk_id = cb.data.split(":", 2)[2]
+    payment = await repo.get_payment_by_yk_id(pool, yk_id)
+    if payment is None:
+        await cb.answer("Платёж не найден.", show_alert=True)
+        return
+
+    status, ticket = await tickets.sync_ticket_payment(pool, bot, payment, notify=False)
+    if status == "succeeded" and ticket is not None:
+        event = await repo.get_event(pool, ticket["event_id"])
+        await repo.set_fsm_state(pool, cb.from_user.id, "screen:ticket:paid")
+        await _edit(
+            cb,
+            texts.ticket_success(
+                event["title"], ev.ticket_label(ticket["ticket_type"]),
+                event["starts_at"], event["rules_text"],
+            ),
+            kb.ticket_rules_kb(ticket["id"]),
+        )
+        logger.info(f"🤖 Бот → @{cb.from_user.username or '—'}: билет оплачен (#{ticket['id']})")
+    elif status in ("no_seats", "no_event"):
+        text = texts.TICKET_NO_EVENT if status == "no_event" else texts.TICKET_SOLD_DURING
+        await _edit(cb, text, kb.to_menu_kb())
+    elif status == "canceled":
+        await _edit(cb, texts.PAY_CANCELED, kb.to_menu_kb())
+    else:
+        await cb.answer(texts.PAY_STILL_PENDING, show_alert=True)
+
+
+# ── Согласие с правилами → показать адрес ────────────────────────────────────
+@router.callback_query(F.data.startswith(f"{kb.TAGREE}:"))
+async def ticket_show_address(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    ticket_id = int(cb.data.split(":", 1)[1])
+    ticket = await repo.get_ticket(pool, ticket_id)
+    # Адрес показываем только владельцу оплаченного билета.
+    if ticket is None or ticket["tg_id"] != cb.from_user.id or ticket["status"] != "paid":
+        await cb.answer("Билет не найден.", show_alert=True)
+        return
+
+    event = await repo.get_event(pool, ticket["event_id"])
+    if event is None:
+        await cb.answer("Событие не найдено.", show_alert=True)
+        return
+
+    await repo.set_ticket_rules_agreed(pool, ticket_id)
+    await repo.set_fsm_state(pool, cb.from_user.id, f"screen:ticket:address:{ticket_id}")
+    await _edit(cb, texts.ticket_address(event["title"], event["address"]), kb.ticket_address_kb())
+    logger.info(
+        f"🤖 Бот → @{cb.from_user.username or '—'}: согласие с правилами, "
+        f"показан адрес (билет #{ticket_id})"
     )
