@@ -52,5 +52,32 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # Веб-админка (цикл 2). Открывается на http://localhost:8011.
+  # Миграции применяет сервис bot; админка ждёт появления таблиц.
+  admin:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      REDIS_URL: redis://redis:6379/0
+      # Локальные значения для входа (для прода задаются в боевом .env).
+      ADMIN_WEB_SECRET: dev-insecure-change-me
+      ADMIN_WEB_LOGIN: admin
+      ADMIN_WEB_PASSWORD: admin123
+      WATCHFILES_FORCE_POLLING: "true"
+    command: ["uvicorn", "src.webadmin.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/src"]
+    ports:
+      - "8011:8000"
+    volumes:
+      - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   pgdata_dev:

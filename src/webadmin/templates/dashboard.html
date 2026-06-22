@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Дашборд{% endblock %}
+{% block heading %}Дашборд{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2 class="panel-title">Админ-панель запущена</h2>
+  <p class="panel-text">
+    Это рабочий каркас панели управления. Вход, выход и смена пароля уже работают.
+    Разделы ниже подключаются поэтапно — по мере готовности они станут активными в меню слева.
+  </p>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="card-head">
+      <span class="card-dot dot-blue"></span>
+      <span class="card-name">Мероприятия</span>
+    </div>
+    <p class="card-desc">Создание событий (бани, ретриты), цены по типам билетов, места и расписание.</p>
+    <span class="card-stage">Этап 12</span>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-dot dot-green"></span>
+      <span class="card-name">Подписки</span>
+    </div>
+    <p class="card-desc">Список подписчиков со сроками, ручное продление и отключение.</p>
+    <span class="card-stage">Этап 19</span>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-dot dot-blue"></span>
+      <span class="card-name">Реферальная программа</span>
+    </div>
+    <p class="card-desc">Суммы бонусов, цепочки приглашений, ручное начисление и списание.</p>
+    <span class="card-stage">Этап 17</span>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-dot dot-green"></span>
+      <span class="card-name">Статистика</span>
+    </div>
+    <p class="card-desc">Доход за период со сравнением, по направлениям; графики и показатели.</p>
+    <span class="card-stage">Этап 20</span>
+  </div>
+</div>
+
+{% endblock %}
