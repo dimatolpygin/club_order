@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 
 from ..db import get_pool
 from ..logger import logger
+from ..services import events as events_logic
 from . import events_repo
 from .deps import current_admin, templates
 
@@ -142,6 +143,9 @@ async def events_list(request: Request):
     pool = get_pool()
     events = await events_repo.list_events(pool)
     prices = await events_repo.prices_by_event(pool)
+    counts = await events_repo.ticket_counts_by_event(pool)
+    # Занятые места по событию: {event_id: {male, female, total}} (пара = 2 места).
+    occupancy = {eid: events_logic.seats_occupied(c) for eid, c in counts.items()}
     now = datetime.now(timezone.utc)
     upcoming, past = [], []
     for e in events:
@@ -151,6 +155,7 @@ async def events_list(request: Request):
         {
             "active": "events", "admin": request.session.get("admin"),
             "upcoming": upcoming, "past": past, "prices": prices,
+            "occupancy": occupancy,
             "kind_label": _KIND_LABEL, "type_label": _TYPE_LABEL, "ticket_types": TICKET_TYPES,
         },
     )

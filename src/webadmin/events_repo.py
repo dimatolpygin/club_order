@@ -43,6 +43,22 @@ async def prices_by_event(pool: asyncpg.Pool) -> dict[int, dict[str, int]]:
     return out
 
 
+async def ticket_counts_by_event(pool: asyncpg.Pool) -> dict[int, dict[str, int]]:
+    """Число оплаченных билетов по типам для всех событий — без N+1.
+
+    {event_id: {ticket_type: count}}. Занятые места считаются из этого в
+    services.events.seats_occupied (пара = 2 места).
+    """
+    rows = await pool.fetch(
+        "SELECT event_id, ticket_type, count(*) AS c FROM tickets "
+        "WHERE status = 'paid' GROUP BY event_id, ticket_type"
+    )
+    out: dict[int, dict[str, int]] = {}
+    for r in rows:
+        out.setdefault(r["event_id"], {})[r["ticket_type"]] = r["c"]
+    return out
+
+
 async def create_event(pool: asyncpg.Pool, data: dict) -> int:
     return await pool.fetchval(
         """

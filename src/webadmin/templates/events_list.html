@@ -12,11 +12,24 @@
   {%- else -%}<span class="muted">цены не заданы</span>{%- endif -%}
 {%- endmacro %}
 
-{% macro seats_cell(e) -%}
-  {%- if e.gender_balance -%}
-    М: {{ e.seats_male if e.seats_male is not none else '∞' }} / Ж: {{ e.seats_female if e.seats_female is not none else '∞' }}
+{% macro cap_line(label, sold, cap) -%}
+  {%- if cap is none -%}
+    {{ label }}: продано {{ sold }} <span class="muted">(без лимита)</span>
   {%- else -%}
-    Всего: {{ e.seats_total if e.seats_total is not none else '∞' }}
+    {%- set left = cap - sold -%}
+    {{ label }}: {{ sold }}/{{ cap }}
+    {%- if left <= 0 %} <span class="pill">мест нет</span>
+    {%- else %} <span class="muted">(ост. {{ left }})</span>{% endif -%}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro seats_cell(e) -%}
+  {%- set o = occupancy.get(e.id, {}) -%}
+  {%- if e.gender_balance -%}
+    {{ cap_line('М', o.get('male', 0), e.seats_male) }}<br>
+    {{ cap_line('Ж', o.get('female', 0), e.seats_female) }}
+  {%- else -%}
+    {{ cap_line('Всего', o.get('total', 0), e.seats_total) }}
   {%- endif -%}
 {%- endmacro %}
 
