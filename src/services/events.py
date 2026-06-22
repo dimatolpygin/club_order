@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 # Виды событий.
@@ -159,6 +160,21 @@ def seats_occupied(counts: Mapping[str, int]) -> dict[str, int]:
         female += c * nf
         total += c * ntot
     return {"male": male, "female": female, "total": total}
+
+
+def apply_discount(price: int | Decimal, percent: int) -> Decimal:
+    """Цена со скидкой подписчика, % (0..100). Округление до копеек (ROUND_HALF_UP).
+
+    Скидка ≤0 — цена без изменений; ≥100 — цена 0 (страховка, админ валидирует 0..100).
+    Едина для показа и для суммы платежа, чтобы цифры на экране и в чеке совпадали.
+    """
+    base = Decimal(str(price))
+    if not percent or percent <= 0:
+        return base
+    if percent >= 100:
+        return Decimal("0.00")
+    discounted = base * (Decimal(100) - Decimal(percent)) / Decimal(100)
+    return discounted.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def event_available(

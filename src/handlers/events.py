@@ -34,6 +34,12 @@ async def _edit(cb: CallbackQuery, text: str, markup) -> None:
     await cb.answer()
 
 
+async def _subscriber_discount(pool: asyncpg.Pool, tg_id: int, event) -> int:
+    """Скидка участника клуба на событие, % (0 — если нет активной подписки)."""
+    is_subscriber = await repo.get_active_subscription(pool, tg_id) is not None
+    return event["subscriber_discount_percent"] if is_subscriber else 0
+
+
 # ── Список мероприятий ───────────────────────────────────────────────────────
 @router.callback_query(F.data == kb.NAV_EVENTS)
 async def show_events(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
@@ -78,8 +84,8 @@ async def show_event(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:event:{event_id}")
     prices = await repo.get_event_prices(pool, event_id)
-    # Занятость по проданным билетам — этап 14; пока считаем места по конфигу.
-    items = ev.seat_availability(event, prices)
+    counts = await repo.get_event_ticket_counts(pool, event_id)
+    items = ev.seat_availability(event, prices, ev.seats_occupied(counts))
 
     # Ни одного типа со свободными местами (или вовсе без цен) → «Мест нет».
     if not any(available for _, _, available in items):
@@ -90,11 +96,19 @@ async def show_event(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
-    text = texts.event_card(ev.kind_label(event["kind"]), event["title"], event["starts_at"])
-    await _edit(cb, text, kb.event_tickets_kb(event_id, items))
+    # Скидка участника клуба (этап 15): активная подписка → цена со скидкой события.
+    discount_pct = await _subscriber_discount(pool, cb.from_user.id, event)
+    display_items = [
+        (ttype, ev.apply_discount(price, discount_pct), available)
+        for ttype, price, available in items
+    ]
+    text = texts.event_card(
+        ev.kind_label(event["kind"]), event["title"], event["starts_at"], discount_pct
+    )
+    await _edit(cb, text, kb.event_tickets_kb(event_id, display_items))
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: событие «{event['title']}», "
-        f"{len(items)} тип(ов) билетов"
+        f"{len(items)} тип(ов) билетов, скидка участника {discount_pct}%"
     )
 
 
@@ -121,13 +135,16 @@ async def choose_ticket(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
 
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:ticket:{event_id}:{ttype}")
+    discount_pct = await _subscriber_discount(pool, cb.from_user.id, event)
+    eff = ev.apply_discount(prices[ttype], discount_pct)
     text = texts.event_ticket_summary(
-        event["title"], ev.ticket_label(ttype), fmt_price(prices[ttype])
+        event["title"], ev.ticket_label(ttype), fmt_price(eff),
+        discount_pct, fmt_price(prices[ttype]) if discount_pct else None,
     )
     await _edit(cb, text, kb.event_ticket_summary_kb(event_id, ttype))
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: выбран билет {ttype} на "
-        f"«{event['title']}» — {fmt_price(prices[ttype])} ₽"
+        f"«{event['title']}» — {fmt_price(eff)} ₽ (скидка {discount_pct}%)"
     )
 
 

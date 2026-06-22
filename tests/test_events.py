@@ -182,6 +182,21 @@ def main() -> None:
           (ev.has_seats(g2, "male", occ2), ev.has_seats(g2, "pair_mm", occ2)),
           (True, False))
 
+    # ── Скидка подписчику на билеты (этап 15) ─────────────────────────────────
+    from decimal import Decimal
+    check("скидка 0% → цена без изменений",
+          ev.apply_discount(1000, 0), Decimal("1000"))
+    check("скидка отрицательная/нет → без изменений",
+          ev.apply_discount(1000, 0), Decimal("1000"))
+    check("скидка 12% от 1222 → 1075.36",
+          ev.apply_discount(1222, 12), Decimal("1075.36"))
+    check("скидка 50% от 2444 → 1222",
+          ev.apply_discount(2444, 50), Decimal("1222.00"))
+    check("скидка 100% → 0",
+          ev.apply_discount(500, 100), Decimal("0.00"))
+    check("скидка округляется до копеек (ROUND_HALF_UP): 10% от 111 → 99.90",
+          ev.apply_discount(111, 10), Decimal("99.90"))
+
     print("\nВсе проверки пройдены.")
 
 

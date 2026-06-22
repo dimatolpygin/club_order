@@ -51,7 +51,11 @@ async def start_ticket_payment(
     if not ev.has_seats(event, ticket_type, occupied):
         return "no_seats", None
 
-    amount = Decimal(str(prices[ticket_type]))
+    # Скидка участника клуба: активная подписка 11:11 + процент события (этап 15).
+    # Источник истины для суммы платежа — проверка подписки здесь и сейчас.
+    is_subscriber = await repo.get_active_subscription(pool, tg_id) is not None
+    discount_pct = event["subscriber_discount_percent"] if is_subscriber else 0
+    amount = ev.apply_discount(prices[ticket_type], discount_pct)
     user = await repo.get_user(pool, tg_id)
     description = (
         f"Билет «{ev.ticket_label(ticket_type)}» на «{event['title']}»"
@@ -89,9 +93,10 @@ async def start_ticket_payment(
         event_id=event_id,
         ticket_type=ticket_type,
     )
+    disc_note = f", скидка подписчику {discount_pct}%" if discount_pct else ""
     logger.info(
         f"🎟 Платёж за билет создан: tg_id={tg_id}, событие #{event_id}, "
-        f"{ticket_type}, {fmt_price(amount)} ₽, yk_id={yk_id}"
+        f"{ticket_type}, {fmt_price(amount)} ₽{disc_note}, yk_id={yk_id}"
     )
     return "ok", {
         "payment_id": yk_id,

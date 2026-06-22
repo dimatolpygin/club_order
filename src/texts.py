@@ -384,23 +384,38 @@ EVENTS_NONE = (
 )
 
 
-def event_card(kind_label: str, title: str, starts_at) -> str:
-    """Карточка события: вид, название, дата и время начала."""
+def event_card(kind_label: str, title: str, starts_at, discount_pct: int = 0) -> str:
+    """Карточка события: вид, название, дата/время. discount_pct>0 — скидка участника."""
+    note = (
+        f"Тебе как участнику клуба — скидка {discount_pct}% (уже в ценах ниже).\n\n"
+        if discount_pct > 0 else ""
+    )
     return (
         f"<b>{title}</b>\n\n"
         f"Формат: {kind_label}\n"
         f"Когда: {starts_at:%d.%m.%Y} в {starts_at:%H:%M}\n\n"
+        f"{note}"
         "Выбери тип билета:"
     )
 
 
-# Билет выбран — сводка перед оплатой.
-def event_ticket_summary(title: str, ticket_label: str, price: str) -> str:
+# Билет выбран — сводка перед оплатой. base_price задан → показываем скидку участника.
+def event_ticket_summary(
+    title: str, ticket_label: str, price: str,
+    discount_pct: int = 0, base_price: str | None = None,
+) -> str:
+    if discount_pct > 0 and base_price is not None:
+        price_block = (
+            f"Цена: <s>{base_price} ₽</s>\n"
+            f"<b>Со скидкой участника −{discount_pct}%: {price} ₽</b>\n\n"
+        )
+    else:
+        price_block = f"<b>Стоимость: {price} ₽</b>\n\n"
     return (
         "<b>ОФОРМЛЕНИЕ БИЛЕТА</b>\n\n"
         f"Событие: <b>{title}</b>\n"
         f"Тип билета: {ticket_label}\n"
-        f"<b>Стоимость: {price} ₽</b>\n\n"
+        f"{price_block}"
         "Нажми «Перейти к оплате» — откроется защищённая страница ЮKassa."
     )
 
