@@ -44,9 +44,13 @@ async def show_events(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) 
         logger.info(f"🤖 Бот → @{cb.from_user.username or '—'}: мероприятия (пусто)")
         return
 
-    await _edit(cb, texts.EVENTS_LIST, kb.events_list_kb(visible))
+    grouped = ev.group_by_kind(visible)
+    text = texts.events_list([(ev.kind_label(k), evs) for k, evs in grouped])
+    markup = kb.events_list_kb([(ev.kind_short(k), evs) for k, evs in grouped])
+    await _edit(cb, text, markup)
     logger.info(
-        f"🤖 Бот → @{cb.from_user.username or '—'}: мероприятия — {len(visible)} событ."
+        f"🤖 Бот → @{cb.from_user.username or '—'}: мероприятия — {len(visible)} событ. "
+        f"({len(grouped)} групп)"
     )
 
 

@@ -359,12 +359,22 @@ ACCESS_FAILED = (
 
 
 # ── Мероприятия «Фокус.Энергия» (этап 13) ───────────────────────────────────
-# Список событий — заголовок.
-EVENTS_LIST = (
-    "<b>МЕРОПРИЯТИЯ</b>\n\n"
-    "Живые офлайн-встречи: Энерго Баня и ретриты.\n\n"
-    "Выбери событие, чтобы посмотреть билеты:"
-)
+def events_list(groups: list[tuple[str, list]]) -> str:
+    """Список событий, сгруппированный по типу.
+
+    `groups` — `(kind_label, [event_record])` уже в нужном порядке.
+    Каждая строка — название · дата · время. Кнопки выбора — под сообщением.
+    """
+    parts = ["<b>МЕРОПРИЯТИЯ</b>\n", "Живые офлайн-встречи."]
+    for kind_label, events in groups:
+        lines = [f"\n<b>{kind_label}</b>"]
+        for e in events:
+            lines.append(
+                f"— {e['title']} · {e['starts_at']:%d.%m.%Y} в {e['starts_at']:%H:%M}"
+            )
+        parts.append("\n".join(lines))
+    parts.append("\nВыбери событие, чтобы посмотреть билеты:")
+    return "\n".join(parts)
 
 # Нет доступных событий к показу.
 EVENTS_NONE = (

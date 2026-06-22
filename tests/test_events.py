@@ -82,6 +82,18 @@ def main() -> None:
     check("показ: только прошедшие → пусто",
           ev.visible_events([past_retreat, banya_past], NOW), [])
 
+    # ── Группировка по типу для списка ────────────────────────────────────────
+    grouped = ev.group_by_kind(visible)  # visible = [5(баня),2(ретрит),3(ретрит),7(баня)]
+    check("группировка: порядок типов — бани, затем ретриты",
+          [k for k, _ in grouped], [ev.KIND_BANYA, ev.KIND_RETREAT])
+    check("группировка: бани собраны вместе (5,7)",
+          [e["id"] for e in dict(grouped)[ev.KIND_BANYA]], [5, 7])
+    check("группировка: ретриты собраны вместе (2,3)",
+          [e["id"] for e in dict(grouped)[ev.KIND_RETREAT]], [2, 3])
+    check("короткие подписи типов",
+          (ev.kind_short(ev.KIND_BANYA), ev.kind_short(ev.KIND_RETREAT)),
+          ("Баня", "Ретрит"))
+
     # ── Доступность мест: общий пул ───────────────────────────────────────────
     pooled = make_event(gender_balance=False, seats_total=3)
     check("общий пул: одиночный билет — место есть",

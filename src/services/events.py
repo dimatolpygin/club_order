@@ -19,6 +19,10 @@ KIND_BANYA = "banya"
 KIND_RETREAT = "retreat"
 
 KIND_LABELS = {KIND_BANYA: "Энерго Баня", KIND_RETREAT: "Ретрит"}
+# Короткая подпись типа для компактных кнопок списка.
+KIND_SHORT = {KIND_BANYA: "Баня", KIND_RETREAT: "Ретрит"}
+# Порядок групп в списке: сначала бани, потом ретриты, затем прочее.
+KIND_ORDER = (KIND_BANYA, KIND_RETREAT)
 
 # Типы билетов в порядке показа и их подписи.
 TICKET_TYPES = ("male", "female", "pair_mf", "pair_ff", "pair_mm")
@@ -33,6 +37,27 @@ TICKET_LABELS = {
 
 def kind_label(kind: str) -> str:
     return KIND_LABELS.get(kind, kind)
+
+
+def kind_short(kind: str) -> str:
+    return KIND_SHORT.get(kind, kind)
+
+
+def group_by_kind(
+    events: Iterable[Mapping[str, Any]]
+) -> list[tuple[str, list[Mapping[str, Any]]]]:
+    """Группирует события по типу для показа в списке с заголовками.
+
+    Порядок групп — KIND_ORDER (бани, ретриты), затем прочие типы по алфавиту.
+    Внутри группы — как пришло (visible_events уже сортирует по дате).
+    """
+    groups: dict[str, list[Mapping[str, Any]]] = {}
+    for e in events:
+        groups.setdefault(e["kind"], []).append(e)
+
+    ordered_kinds = [k for k in KIND_ORDER if k in groups]
+    ordered_kinds += sorted(k for k in groups if k not in KIND_ORDER)
+    return [(k, groups[k]) for k in ordered_kinds]
 
 
 def ticket_label(ticket_type: str) -> str:

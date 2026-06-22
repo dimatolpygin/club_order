@@ -144,16 +144,21 @@ def to_menu_kb() -> InlineKeyboardMarkup:
 
 
 # ── Мероприятия (этап 13) ────────────────────────────────────────────────────
-def events_list_kb(events: list) -> InlineKeyboardMarkup:
-    """Список событий: по кнопке на событие (название · дата) + «Назад» в меню."""
+def events_list_kb(groups: list) -> InlineKeyboardMarkup:
+    """Список событий: кнопка на событие с подписью типа (Тип · Название · дата).
+
+    `groups` — `(kind_short, [event_record])` в порядке показа. Тип в подписи,
+    чтобы в списке было видно, где баня, а где ретрит. + «Назад» в меню.
+    """
     b = InlineKeyboardBuilder()
-    for e in events:
-        b.row(
-            InlineKeyboardButton(
-                text=f"{e['title']} · {e['starts_at']:%d.%m}",
-                callback_data=f"{EVT_OPEN}:{e['id']}",
+    for kind_short, events in groups:
+        for e in events:
+            b.row(
+                InlineKeyboardButton(
+                    text=f"{kind_short} · {e['title']} · {e['starts_at']:%d.%m}",
+                    callback_data=f"{EVT_OPEN}:{e['id']}",
+                )
             )
-        )
     b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_MENU))
     return b.as_markup()
 
