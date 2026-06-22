@@ -102,8 +102,19 @@ async def show_event(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         (ttype, ev.apply_discount(price, discount_pct), available)
         for ttype, price, available in items
     ]
+    # Для подписчика — разбивка со зачёркнутой старой ценой (в кнопках зачёркивание
+    # невозможно, поэтому показываем «старая → новая» в тексте карточки).
+    price_lines = None
+    if discount_pct > 0:
+        price_lines = [
+            f"{ev.ticket_label(ttype)}: <s>{fmt_price(old)} ₽</s> → "
+            f"<b>{fmt_price(new)} ₽</b>"
+            for (ttype, old, avail), (_, new, _) in zip(items, display_items)
+            if avail
+        ]
     text = texts.event_card(
-        ev.kind_label(event["kind"]), event["title"], event["starts_at"], discount_pct
+        ev.kind_label(event["kind"]), event["title"], event["starts_at"],
+        discount_pct, price_lines,
     )
     await _edit(cb, text, kb.event_tickets_kb(event_id, display_items))
     logger.info(

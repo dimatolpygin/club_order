@@ -384,17 +384,29 @@ EVENTS_NONE = (
 )
 
 
-def event_card(kind_label: str, title: str, starts_at, discount_pct: int = 0) -> str:
-    """Карточка события: вид, название, дата/время. discount_pct>0 — скидка участника."""
-    note = (
-        f"Тебе как участнику клуба — скидка {discount_pct}% (уже в ценах ниже).\n\n"
-        if discount_pct > 0 else ""
-    )
+def event_card(
+    kind_label: str, title: str, starts_at,
+    discount_pct: int = 0, price_lines: list[str] | None = None,
+) -> str:
+    """Карточка события: вид, название, дата/время.
+
+    discount_pct>0 — скидка участника. price_lines (для подписчика) — строки вида
+    «Мужской: <s>1 222 ₽</s> → 1 075,36 ₽» с зачёркнутой старой ценой.
+    """
+    if discount_pct > 0 and price_lines:
+        block = (
+            f"Тебе как участнику клуба — скидка {discount_pct}%:\n"
+            + "\n".join(price_lines) + "\n\n"
+        )
+    elif discount_pct > 0:
+        block = f"Тебе как участнику клуба — скидка {discount_pct}% (уже в ценах ниже).\n\n"
+    else:
+        block = ""
     return (
         f"<b>{title}</b>\n\n"
         f"Формат: {kind_label}\n"
         f"Когда: {starts_at:%d.%m.%Y} в {starts_at:%H:%M}\n\n"
-        f"{note}"
+        f"{block}"
         "Выбери тип билета:"
     )
 
