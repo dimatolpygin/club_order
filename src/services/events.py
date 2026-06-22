@@ -64,11 +64,17 @@ def ticket_label(ticket_type: str) -> str:
     return TICKET_LABELS.get(ticket_type, ticket_type)
 
 
-def visible_events(rows: Iterable[Mapping[str, Any]], now: datetime) -> list[Mapping[str, Any]]:
+def visible_events(
+    rows: Iterable[Mapping[str, Any]],
+    now: datetime,
+    sold_out_ids: frozenset[int] | set[int] = frozenset(),
+) -> list[Mapping[str, Any]]:
     """Отбирает события, видимые пользователю, по бизнес-правилам показа.
 
     - Только активные (`is_active`) и ещё не прошедшие (`starts_at >= now`).
-    - Ретриты — показываем все.
+    - Полностью распроданные (`sold_out_ids`) скрываются — чтобы «ближайшей»
+      баней стала ближайшая баня СО СВОБОДНЫМИ местами, а не висела распроданная.
+    - Ретриты — показываем все (оставшиеся после фильтра распроданных).
     - Баня — только ближайшая по времени, плюс те, у кого стоит «показывать
       заранее» (`show_in_advance`). После даты ближайшей бани следующая
       становится ближайшей автоматически (прошедшие отфильтрованы по `now`).
@@ -77,7 +83,7 @@ def visible_events(rows: Iterable[Mapping[str, Any]], now: datetime) -> list[Map
     """
     upcoming = [
         e for e in rows
-        if e["is_active"] and e["starts_at"] >= now
+        if e["is_active"] and e["starts_at"] >= now and e["id"] not in sold_out_ids
     ]
 
     banyas = sorted(
@@ -153,6 +159,19 @@ def seats_occupied(counts: Mapping[str, int]) -> dict[str, int]:
         female += c * nf
         total += c * ntot
     return {"male": male, "female": female, "total": total}
+
+
+def event_available(
+    event: Mapping[str, Any],
+    prices: Mapping[str, int],
+    occupied: Mapping[str, int] | None = None,
+) -> bool:
+    """Есть ли у события хоть один продаваемый тип билета со свободным местом.
+
+    Учитываются только типы с заданной ценой. False → событие полностью
+    распродано (или вовсе без цен) → скрываем из списка в боте.
+    """
+    return any(has_seats(event, ttype, occupied) for ttype in prices)
 
 
 def seat_availability(

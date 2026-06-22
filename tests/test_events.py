@@ -82,6 +82,30 @@ def main() -> None:
     check("показ: только прошедшие → пусто",
           ev.visible_events([past_retreat, banya_past], NOW), [])
 
+    # ── Скрытие распроданных + промотирование следующей бани ──────────────────
+    # banya_near (5) распродан → ближайшей баней должна стать banya_next (6).
+    visible_sold = ev.visible_events(rows, NOW, sold_out_ids={5})
+    banya_visible = [r["id"] for r in visible_sold if r["kind"] == ev.KIND_BANYA]
+    check("распродан ближайший: показывается следующая баня (6) + заранее (7)",
+          sorted(banya_visible), [6, 7])
+    check("распродан ближайший: сам распроданный (5) скрыт",
+          5 in [r["id"] for r in visible_sold], False)
+
+    # event_available: общий пул распродан → событие недоступно (скрываем).
+    full_pool = make_event(gender_balance=False, seats_total=1)
+    occ_full = ev.seats_occupied({"female": 1})  # total=1 из 1
+    check("event_available: общий пул распродан → False",
+          ev.event_available(full_pool, {"male": 100, "female": 100}, occ_full), False)
+    check("event_available: есть свободное место → True",
+          ev.event_available(make_event(seats_total=2), {"male": 100}, occ_full), True)
+    check("event_available: без цен → False (продавать нечего)",
+          ev.event_available(make_event(seats_total=10), {}, {}), False)
+    # Раздельно: распродан только мужской пул, женский свободен → доступно.
+    gp = make_event(gender_balance=True, seats_total=None, seats_male=1, seats_female=2)
+    check("event_available: М распродан, Ж свободен, есть цена Ж → True",
+          ev.event_available(gp, {"male": 1, "female": 1}, ev.seats_occupied({"male": 1})),
+          True)
+
     # ── Группировка по типу для списка ────────────────────────────────────────
     grouped = ev.group_by_kind(visible)  # visible = [5(баня),2(ретрит),3(ретрит),7(баня)]
     check("группировка: порядок типов — бани, затем ретриты",

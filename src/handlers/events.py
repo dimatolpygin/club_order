@@ -41,7 +41,17 @@ async def show_events(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) 
     await repo.set_fsm_state(pool, cb.from_user.id, "screen:events")
 
     rows = await repo.list_events(pool)
-    visible = ev.visible_events(rows, datetime.now(timezone.utc))
+    # Полностью распроданные события скрываем (иначе распроданная баня заняла бы
+    # слот «ближайшей» и спрятала следующую доступную). Цены и продажи — пакетно.
+    prices_all = await repo.prices_by_event(pool)
+    counts_all = await repo.ticket_counts_by_event(pool)
+    sold_out_ids = {
+        e["id"] for e in rows
+        if not ev.event_available(
+            e, prices_all.get(e["id"], {}), ev.seats_occupied(counts_all.get(e["id"], {}))
+        )
+    }
+    visible = ev.visible_events(rows, datetime.now(timezone.utc), sold_out_ids)
     if not visible:
         await _edit(cb, texts.EVENTS_NONE, kb.to_menu_kb())
         logger.info(f"🤖 Бот → @{cb.from_user.username or '—'}: мероприятия (пусто)")

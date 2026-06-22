@@ -443,6 +443,27 @@ async def get_event_prices(pool: asyncpg.Pool, event_id: int) -> dict[str, int]:
     return {r["ticket_type"]: r["price"] for r in rows}
 
 
+async def prices_by_event(pool: asyncpg.Pool) -> dict[int, dict[str, int]]:
+    """Цены всех событий сразу (для фильтра распроданных без N+1)."""
+    rows = await pool.fetch("SELECT event_id, ticket_type, price FROM event_ticket_prices")
+    out: dict[int, dict[str, int]] = {}
+    for r in rows:
+        out.setdefault(r["event_id"], {})[r["ticket_type"]] = r["price"]
+    return out
+
+
+async def ticket_counts_by_event(pool: asyncpg.Pool) -> dict[int, dict[str, int]]:
+    """Оплаченные билеты всех событий: {event_id: {ticket_type: count}}."""
+    rows = await pool.fetch(
+        "SELECT event_id, ticket_type, count(*) AS c FROM tickets "
+        "WHERE status = 'paid' GROUP BY event_id, ticket_type"
+    )
+    out: dict[int, dict[str, int]] = {}
+    for r in rows:
+        out.setdefault(r["event_id"], {})[r["ticket_type"]] = r["c"]
+    return out
+
+
 # ── Платежи (payments) ───────────────────────────────────────────────────────
 async def create_payment(
     pool: asyncpg.Pool,

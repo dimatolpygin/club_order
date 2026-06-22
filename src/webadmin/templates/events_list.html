@@ -18,7 +18,7 @@
   {%- else -%}
     {%- set left = cap - sold -%}
     {{ label }}: {{ sold }}/{{ cap }}
-    {%- if left <= 0 %} <span class="pill">мест нет</span>
+    {%- if left <= 0 %} <span class="pill pill-danger">мест нет</span>
     {%- else %} <span class="muted">(ост. {{ left }})</span>{% endif -%}
   {%- endif -%}
 {%- endmacro %}
