@@ -14,16 +14,16 @@ from pathlib import Path
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from ..config import settings
 from ..db import close_pool, get_pool, init_pool
 from ..logger import logger, setup_logging
 from . import auth, repo
+from .deps import NotAuthenticated, current_admin, templates
+from .events import router as events_router
 
 _HERE = Path(__file__).resolve().parent
-templates = Jinja2Templates(directory=str(_HERE / "templates"))
 
 app = FastAPI(title="Админка 11:11 / Фокус.Энергия", docs_url=None, redoc_url=None)
 app.add_middleware(
@@ -33,23 +33,12 @@ app.add_middleware(
     max_age=14 * 24 * 3600,  # 2 недели
 )
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
-
-
-class NotAuthenticated(Exception):
-    """Бросается, когда страница требует входа, а сессии нет."""
+app.include_router(events_router)
 
 
 @app.exception_handler(NotAuthenticated)
 async def _redirect_to_login(request: Request, exc: NotAuthenticated):
     return RedirectResponse("/login", status_code=303)
-
-
-def current_admin(request: Request) -> dict:
-    """Зависимость: текущий вошедший админ из сессии или редирект на вход."""
-    admin = request.session.get("admin")
-    if not admin:
-        raise NotAuthenticated()
-    return admin
 
 
 # ── Жизненный цикл ───────────────────────────────────────────────────────────

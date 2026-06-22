@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Новое мероприятие' if is_new else 'Редактирование мероприятия' }}{% endblock %}
+{% block heading %}{{ 'Новое мероприятие' if is_new else 'Редактирование мероприятия' }}{% endblock %}
+{% block content %}
+
+<div class="page-actions">
+  <a class="btn btn-light" href="/events">← К списку мероприятий</a>
+</div>
+
+<div class="panel">
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ '/events/new' if is_new else '/events/' ~ f.id ~ '/edit' }}" class="form form-grid">
+
+    <label class="field">
+      <span class="field-label">Тип мероприятия</span>
+      <select class="input" name="kind">
+        {% for val, label in kinds %}
+        <option value="{{ val }}" {{ 'selected' if f.kind == val }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label class="field">
+      <span class="field-label">Дата и время</span>
+      <input class="input" type="datetime-local" name="starts_at" value="{{ f.starts_at }}" required>
+    </label>
+
+    <label class="field field-wide">
+      <span class="field-label">Название</span>
+      <input class="input" type="text" name="title" value="{{ f.title }}" maxlength="200" required>
+    </label>
+
+    <div class="field field-wide">
+      <label class="check">
+        <input type="checkbox" name="gender_balance" {{ 'checked' if f.gender_balance }} onchange="toggleSeats(this.checked)">
+        <span>Гендерный баланс — раздельный учёт мужских и женских мест</span>
+      </label>
+    </div>
+
+    <label class="field" id="seats-total-field">
+      <span class="field-label">Всего мест</span>
+      <input class="input" type="number" name="seats_total" min="0" value="{{ f.seats_total }}" placeholder="не ограничено">
+    </label>
+
+    <label class="field" id="seats-male-field">
+      <span class="field-label">Мужских мест</span>
+      <input class="input" type="number" name="seats_male" min="0" value="{{ f.seats_male }}" placeholder="не ограничено">
+    </label>
+
+    <label class="field" id="seats-female-field">
+      <span class="field-label">Женских мест</span>
+      <input class="input" type="number" name="seats_female" min="0" value="{{ f.seats_female }}" placeholder="не ограничено">
+    </label>
+
+    <div class="field field-wide">
+      <span class="field-label">Цены билетов по типам, ₽</span>
+      <span class="field-hint">Оставьте поле пустым, если такой тип билета на этом мероприятии не продаётся.</span>
+      <div class="price-grid">
+        {% for val, label in ticket_types %}
+        <label class="price-cell">
+          <span class="price-label">{{ label }}</span>
+          <input class="input" type="number" name="price_{{ val }}" min="0" value="{{ prices.get(val, '') }}" placeholder="—">
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <label class="field">
+      <span class="field-label">Скидка подписчику клуба, %</span>
+      <input class="input" type="number" name="subscriber_discount_percent" min="0" max="100" value="{{ f.subscriber_discount_percent }}">
+    </label>
+
+    <div class="field" id="show-advance-field">
+      <span class="field-label">Показ в боте</span>
+      <label class="check">
+        <input type="checkbox" name="show_in_advance" {{ 'checked' if f.show_in_advance }}>
+        <span>Показывать заранее (для бани — вместе с ближайшей)</span>
+      </label>
+    </div>
+
+    <label class="field field-wide">
+      <span class="field-label">Адрес</span>
+      <span class="field-hint">Показывается пользователю после согласия с правилами (после оплаты).</span>
+      <input class="input" type="text" name="address" value="{{ f.address }}" maxlength="500">
+    </label>
+
+    <label class="field field-wide">
+      <span class="field-label">Правила посещения</span>
+      <textarea class="input textarea" name="rules_text" rows="4" maxlength="4000">{{ f.rules_text }}</textarea>
+    </label>
+
+    <div class="field field-wide">
+      <label class="check">
+        <input type="checkbox" name="is_active" {{ 'checked' if f.is_active }}>
+        <span>Активно — показывать мероприятие в боте</span>
+      </label>
+    </div>
+
+    <div class="field field-wide form-buttons">
+      <button class="btn btn-primary" type="submit">{{ 'Создать мероприятие' if is_new else 'Сохранить изменения' }}</button>
+      <a class="btn btn-light" href="/events">Отмена</a>
+    </div>
+  </form>
+</div>
+
+<script>
+  function toggleSeats(balanced) {
+    document.getElementById('seats-total-field').style.display = balanced ? 'none' : '';
+    document.getElementById('seats-male-field').style.display = balanced ? '' : 'none';
+    document.getElementById('seats-female-field').style.display = balanced ? '' : 'none';
+  }
+  toggleSeats(document.querySelector('[name=gender_balance]').checked);
+</script>
+
+{% endblock %}

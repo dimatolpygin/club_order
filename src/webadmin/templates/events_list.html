@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Мероприятия{% endblock %}
+{% block heading %}Мероприятия{% endblock %}
+{% block content %}
+
+{% macro price_summary(eid) -%}
+  {%- set p = prices.get(eid, {}) -%}
+  {%- if p -%}
+    {%- for t, label in ticket_types if p.get(t) is not none -%}
+      <span class="pill">{{ label }} {{ '{:,}'.format(p[t]).replace(',', ' ') }} ₽</span>
+    {%- endfor -%}
+  {%- else -%}<span class="muted">цены не заданы</span>{%- endif -%}
+{%- endmacro %}
+
+{% macro seats_cell(e) -%}
+  {%- if e.gender_balance -%}
+    М: {{ e.seats_male if e.seats_male is not none else '∞' }} / Ж: {{ e.seats_female if e.seats_female is not none else '∞' }}
+  {%- else -%}
+    Всего: {{ e.seats_total if e.seats_total is not none else '∞' }}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro events_table(rows) %}
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Дата и время</th><th>Тип</th><th>Название</th>
+        <th>Места</th><th>Билеты</th><th>Показ</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for e in rows %}
+      <tr class="{{ '' if e.is_active else 'row-hidden' }}">
+        <td class="nowrap">{{ e.starts_at.strftime('%d.%m.%Y · %H:%M') }}</td>
+        <td><span class="badge {{ 'badge-blue' if e.kind == 'banya' else 'badge-green' }}">{{ kind_label.get(e.kind, e.kind) }}</span></td>
+        <td>
+          {{ e.title }}
+          {% if e.kind == 'banya' and e.show_in_advance %}<span class="pill">показывать заранее</span>{% endif %}
+          {% if e.subscriber_discount_percent %}<span class="pill">скидка подписчику {{ e.subscriber_discount_percent }}%</span>{% endif %}
+        </td>
+        <td class="nowrap">{{ seats_cell(e) }}</td>
+        <td class="cell-prices">{{ price_summary(e.id) }}</td>
+        <td>{% if e.is_active %}<span class="dot-ok"></span> в боте{% else %}<span class="dot-off"></span> скрыто{% endif %}</td>
+        <td class="nowrap actions">
+          <a class="btn btn-light btn-sm" href="/events/{{ e.id }}/edit">Изменить</a>
+          <form method="post" action="/events/{{ e.id }}/delete" class="inline"
+                onsubmit="return confirm('Удалить мероприятие «{{ e.title }}»? Действие необратимо.');">
+            <button type="submit" class="btn btn-danger btn-sm">Удалить</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+<div class="page-actions">
+  <a class="btn btn-primary" href="/events/new">Добавить мероприятие</a>
+</div>
+
+<h2 class="section-title">Предстоящие</h2>
+{% if upcoming %}{{ events_table(upcoming) }}
+{% else %}<div class="empty">Пока нет предстоящих мероприятий. Нажмите «Добавить мероприятие».</div>{% endif %}
+
+{% if past %}
+<h2 class="section-title section-muted">Прошедшие</h2>
+{{ events_table(past) }}
+{% endif %}
+
+{% endblock %}
