@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from typing import Any
 
 # Виды событий.
@@ -177,33 +177,50 @@ def apply_discount(price: int | Decimal, percent: int) -> Decimal:
     return discounted.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+# Порядок предпочтения при равной цене: чем меньше ранг, тем «дешевле» в учёте
+# (скидка подписчика и новичка не тратят активацию промокода).
+_DISCOUNT_RANK = {"subscriber": 0, "referral": 1, "promo": 2, "none": 3}
+
+
 def best_ticket_price(
-    price: int | Decimal, *, subscriber_pct: int = 0, promo_pct: int = 0
+    price: int | Decimal, *, subscriber_pct: int = 0, promo_pct: int = 0,
+    referral_amount: int | Decimal = 0,
 ) -> tuple[Decimal, str]:
-    """Лучшая цена билета: скидка подписчика и промокод НЕ суммируются (этап 16).
+    """Лучшая цена билета: скидки НЕ суммируются — берётся максимальная (этапы 16–17).
 
-    Берётся та скидка, что даёт МЕНЬШУЮ итоговую цену (большую выгоду клиенту).
+    Кандидаты-скидки (взаимоисключающие, берём дающую МЕНЬШУЮ цену):
+      · subscriber — процент скидки участника клуба (этап 15);
+      · promo      — процент percent-промокода (этап 16);
+      · referral   — фиксированная ₽ скидка новичка по реф-ссылке на баню (этап 17).
+    Бонусы тут НЕ участвуют — они добивают цену уже после скидки (`bonus_cap`).
+
     Пример: 1000 ₽, подписка −10% (900) vs промокод −5% (950) → 900 ₽ (подписка).
+    На равенстве предпочитаем скидку, не тратящую активацию промокода (ранг выше).
 
-    Возвращает (итоговая_цена, applied), где applied:
-      'promo'      — выиграл промокод (расходуем активацию);
-      'subscriber' — выиграла скидка подписчика (промокод НЕ расходуется);
-      'none'       — ни одна скидка не уменьшает цену.
-
-    На равенстве предпочитаем скидку подписчика — чтобы не тратить активацию
-    промокода зря (одинаковую выгоду даёт и она). Обе скидки — проценты 0..100;
-    `fixed_price`-промокоды на билеты не применяются (фильтруется выше по стеку).
+    Возвращает (итоговая_цена, applied): 'subscriber'|'referral'|'promo'|'none'.
     """
     base = Decimal(str(price))
-    sub_price = apply_discount(base, subscriber_pct)
-    promo_price = apply_discount(base, promo_pct)
-    if promo_pct > 0 and promo_price < sub_price:
-        return promo_price, "promo"
-    if subscriber_pct > 0 and sub_price < base:
-        return sub_price, "subscriber"
-    if promo_pct > 0 and promo_price < base:
-        return promo_price, "promo"
-    return base, "none"
+    options: list[tuple[Decimal, str]] = [(base, "none")]
+    if subscriber_pct and subscriber_pct > 0:
+        options.append((apply_discount(base, subscriber_pct), "subscriber"))
+    if promo_pct and promo_pct > 0:
+        options.append((apply_discount(base, promo_pct), "promo"))
+    if referral_amount and referral_amount > 0:
+        ref_price = base - Decimal(str(referral_amount))
+        options.append((max(ref_price, Decimal("0.00")), "referral"))
+    return min(options, key=lambda o: (o[0], _DISCOUNT_RANK[o[1]]))
+
+
+def bonus_cap(price: int | Decimal, wallet: int | Decimal) -> int:
+    """Сколько бонусов можно списать на этот платёж: min(кошелёк, 50% цены), ₽ (этап 17).
+
+    `price` — цена ПОСЛЕ скидки/промо. 1 бонус = 1 ₽; потолок 50% округляется вниз
+    до целого рубля (оплата бонусами «не более 50%»). Возвращает целое ≥ 0.
+    """
+    p = Decimal(str(price))
+    half = (p / 2).to_integral_value(rounding=ROUND_DOWN)
+    cap = min(Decimal(str(wallet)), half)
+    return int(cap) if cap > 0 else 0
 
 
 def event_available(
