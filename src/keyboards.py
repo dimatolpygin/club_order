@@ -24,9 +24,12 @@ EVT_OPEN = "evt"             # evt:{event_id} — открыть карточк�
 EVT_BUY = "evtbuy"           # evtbuy:{event_id}:{ticket_type} — выбрать билет
 EVT_FULL = "evtfull"         # тап по типу без мест — попап «Мест нет»
 # Оплата билета и выдача (этап 14).
-TPAY_CREATE = "tpay:create"  # tpay:create:{event_id}:{ticket_type} — создать платёж
+# tpay:create:{event_id}:{ticket_type}[:{promo_id}] — создать платёж (promo_id опц., этап 16)
+TPAY_CREATE = "tpay:create"
 TPAY_CHECK = "tpay:check"    # tpay:check:{yk_id} — проверить оплату билета
 TAGREE = "tagree"            # tagree:{ticket_id} — согласие с правилами → адрес
+# Промокод на билете (этап 16).
+TPROMO = "tpromo"            # tpromo:{event_id}:{ticket_type} — ввести промокод для билета
 
 def welcome_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
@@ -210,14 +213,46 @@ def event_sold_out_kb(support_url: str | None) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def event_ticket_summary_kb(event_id: int, ticket_type: str) -> InlineKeyboardMarkup:
-    """Сводка по выбранному билету: «Перейти к оплате» + «Назад» к билетам события."""
+def event_ticket_summary_kb(
+    event_id: int, ticket_type: str, promo_id: int | None = None
+) -> InlineKeyboardMarkup:
+    """Сводка по билету: «Перейти к оплате» + «Ввести промокод» + «Назад».
+
+    promo_id (этап 16) — если промокод уже применён, он зашивается в callback оплаты
+    и кнопка предлагает ввести другой; иначе — обычная кнопка ввода промокода.
+    """
     b = InlineKeyboardBuilder()
+    pay_cb = f"{TPAY_CREATE}:{event_id}:{ticket_type}"
+    if promo_id is not None:
+        pay_cb += f":{promo_id}"
+    b.row(InlineKeyboardButton(text="Перейти к оплате", callback_data=pay_cb))
+    promo_label = "Ввести другой промокод" if promo_id is not None else "Ввести промокод"
     b.row(InlineKeyboardButton(
-        text="Перейти к оплате",
-        callback_data=f"{TPAY_CREATE}:{event_id}:{ticket_type}",
+        text=promo_label, callback_data=f"{TPROMO}:{event_id}:{ticket_type}"
     ))
     b.row(InlineKeyboardButton(text="Назад", callback_data=f"{EVT_OPEN}:{event_id}"))
+    return b.as_markup()
+
+
+def ticket_promo_enter_kb(event_id: int, ticket_type: str) -> InlineKeyboardMarkup:
+    """Экран ввода промокода для билета: «Отмена» возвращает к сводке билета."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="Отмена", callback_data=f"{EVT_BUY}:{event_id}:{ticket_type}"
+    ))
+    return b.as_markup()
+
+
+def ticket_promo_retry_kb(event_id: int, ticket_type: str) -> InlineKeyboardMarkup:
+    """Промокод не подошёл: ввести ещё раз / продолжить без него / в меню."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="Ввести промокод ещё раз", callback_data=f"{TPROMO}:{event_id}:{ticket_type}"
+    ))
+    b.row(InlineKeyboardButton(
+        text="Продолжить без промокода", callback_data=f"{EVT_BUY}:{event_id}:{ticket_type}"
+    ))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
     return b.as_markup()
 
 

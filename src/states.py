@@ -11,6 +11,12 @@ class PromoStates(StatesGroup):
     waiting_code = State()
 
 
+class TicketPromoStates(StatesGroup):
+    # Ввод промокода в флоу покупки билета (этап 16). Контекст события и типа
+    # билета (event_id, ticket_type) хранится в data FSM.
+    waiting_code = State()
+
+
 class AdminStates(StatesGroup):
     # Пошаговый ввод в админ-панели. Контекст (id ступени и т.п.) — в data.
     tier_price = State()

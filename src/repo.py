@@ -743,6 +743,8 @@ async def activate_ticket_payment(
                 pay["id"],
                 ticket["id"],
             )
+            # Промокод на билете (этап 16): расходуем активацию в той же транзакции.
+            await _record_promo_redemption(conn, pay)
             return ticket["id"], True, "created"
 
 

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 import asyncpg
 
 from .. import keyboards as kb
@@ -20,8 +20,10 @@ from .. import repo, texts
 from ..logger import logger
 from ..services import app_settings
 from ..services import events as ev
+from ..services import promo as promo_service
 from ..services import tickets
 from ..services.yookassa import YooKassaError
+from ..states import TicketPromoStates
 from ..utils import fmt_price
 from .payment import _return_url
 
@@ -38,6 +40,33 @@ async def _subscriber_discount(pool: asyncpg.Pool, tg_id: int, event) -> int:
     """Скидка участника клуба на событие, % (0 — если нет активной подписки)."""
     is_subscriber = await repo.get_active_subscription(pool, tg_id) is not None
     return event["subscriber_discount_percent"] if is_subscriber else 0
+
+
+async def _ticket_summary_view(
+    pool: asyncpg.Pool, tg_id: int, event, ttype: str, prices, promo=None
+):
+    """Готовит (text, markup) сводки билета с лучшей скидкой (этап 16).
+
+    Скидка участника и промокод НE суммируются — `ev.best_ticket_price` берёт ту,
+    что даёт меньшую цену. promo привязывается к оплате только если он выиграл.
+    """
+    base = prices[ttype]
+    subscriber_pct = await _subscriber_discount(pool, tg_id, event)
+    promo_pct = int(promo["value"]) if promo is not None else 0
+    amount, applied = ev.best_ticket_price(
+        base, subscriber_pct=subscriber_pct, promo_pct=promo_pct
+    )
+    discount_pct = {"promo": promo_pct, "subscriber": subscriber_pct}.get(applied, 0)
+    promo_lost = promo is not None and applied != "promo"
+    promo_id = promo["id"] if (promo is not None and applied == "promo") else None
+    text = texts.event_ticket_summary(
+        event["title"], ev.ticket_label(ttype), fmt_price(amount),
+        discount_pct, fmt_price(base) if discount_pct else None,
+        applied=applied, promo_code=(promo["code"] if promo is not None else None),
+        promo_lost=promo_lost,
+    )
+    markup = kb.event_ticket_summary_kb(event["id"], ttype, promo_id)
+    return text, markup, amount, applied
 
 
 # ── Список мероприятий ───────────────────────────────────────────────────────
@@ -131,7 +160,8 @@ async def ticket_sold_out(cb: CallbackQuery) -> None:
 
 # ── Выбор билета: сводка (оплата — этап 14) ──────────────────────────────────
 @router.callback_query(F.data.startswith(f"{kb.EVT_BUY}:"))
-async def choose_ticket(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+async def choose_ticket(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await state.clear()  # сбрасываем возможный незавершённый ввод промокода
     _, event_id_raw, ttype = cb.data.split(":", 2)
     event_id = int(event_id_raw)
     event = await repo.get_event(pool, event_id)
@@ -146,25 +176,104 @@ async def choose_ticket(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
 
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:ticket:{event_id}:{ttype}")
-    discount_pct = await _subscriber_discount(pool, cb.from_user.id, event)
-    eff = ev.apply_discount(prices[ttype], discount_pct)
-    text = texts.event_ticket_summary(
-        event["title"], ev.ticket_label(ttype), fmt_price(eff),
-        discount_pct, fmt_price(prices[ttype]) if discount_pct else None,
+    text, markup, amount, applied = await _ticket_summary_view(
+        pool, cb.from_user.id, event, ttype, prices
     )
-    await _edit(cb, text, kb.event_ticket_summary_kb(event_id, ttype))
+    await _edit(cb, text, markup)
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: выбран билет {ttype} на "
-        f"«{event['title']}» — {fmt_price(eff)} ₽ (скидка {discount_pct}%)"
+        f"«{event['title']}» — {fmt_price(amount)} ₽ (скидка: {applied})"
+    )
+
+
+# ── Ввод промокода для билета (этап 16) ──────────────────────────────────────
+# Сообщение на каждый невалидный статус промокода в флоу билета.
+_TPROMO_FAIL = {
+    promo_service.NOT_FOUND: texts.TICKET_PROMO_NOT_FOUND,
+    promo_service.EXPIRED: texts.TICKET_PROMO_EXPIRED,
+    promo_service.EXHAUSTED: texts.TICKET_PROMO_EXHAUSTED,
+    promo_service.ALREADY_USED: texts.TICKET_PROMO_ALREADY_USED,
+}
+
+
+@router.callback_query(F.data.startswith(f"{kb.TPROMO}:"))
+async def ticket_promo_enter(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    _, event_id_raw, ttype = cb.data.split(":", 2)
+    event_id = int(event_id_raw)
+    await state.set_state(TicketPromoStates.waiting_code)
+    await state.update_data(event_id=event_id, ticket_type=ttype)
+    await repo.set_fsm_state(pool, cb.from_user.id, f"screen:ticket:promo:{event_id}:{ttype}")
+    await _edit(cb, texts.TICKET_PROMO_ENTER, kb.ticket_promo_enter_kb(event_id, ttype))
+    logger.info(f"🤖 Бот → @{cb.from_user.username or '—'}: ввод промокода на билет")
+
+
+@router.message(TicketPromoStates.waiting_code)
+async def ticket_promo_entered(
+    message: Message, state: FSMContext, pool: asyncpg.Pool
+) -> None:
+    data = await state.get_data()
+    event_id = data.get("event_id")
+    ttype = data.get("ticket_type")
+    await state.clear()
+    if event_id is None or ttype is None:
+        await message.answer(texts.EVENTS_NONE, reply_markup=kb.to_menu_kb())
+        return
+
+    event = await repo.get_event(pool, event_id)
+    if event is None or not event["is_active"]:
+        await message.answer(texts.EVENTS_NONE, reply_markup=kb.to_menu_kb())
+        return
+    prices = await repo.get_event_prices(pool, event_id)
+    if ttype not in prices or not ev.has_seats(event, ttype):
+        await message.answer(texts.EVENT_SOLD_OUT, reply_markup=kb.to_menu_kb())
+        return
+
+    code = promo_service.normalize_code(message.text)
+    promo = await repo.get_promo_by_code(pool, code) if code else None
+    already = (
+        await repo.user_redeemed_promo(pool, promo["id"], message.from_user.id)
+        if promo is not None else False
+    )
+    status = promo_service.validate(
+        promo, now=datetime.now(timezone.utc), already_used=already
+    )
+    if status != promo_service.VALID:
+        await message.answer(
+            _TPROMO_FAIL[status], reply_markup=kb.ticket_promo_retry_kb(event_id, ttype)
+        )
+        logger.info(
+            f"🤖 Бот → @{message.from_user.username or '—'}: промокод на билет «{code}» — {status}"
+        )
+        return
+    # fixed_price-промокоды действуют только на подписку (этап 16).
+    if promo["kind"] != promo_service.KIND_PERCENT:
+        await message.answer(
+            texts.TICKET_PROMO_SUB_ONLY, reply_markup=kb.ticket_promo_retry_kb(event_id, ttype)
+        )
+        logger.info(
+            f"🤖 Бот → @{message.from_user.username or '—'}: промокод «{code}» — только для подписки"
+        )
+        return
+
+    text, markup, amount, applied = await _ticket_summary_view(
+        pool, message.from_user.id, event, ttype, prices, promo
+    )
+    await repo.set_fsm_state(pool, message.from_user.id, f"screen:ticket:{event_id}:{ttype}")
+    await message.answer(text, reply_markup=markup)
+    logger.info(
+        f"🤖 Бот → @{message.from_user.username or '—'}: промокод «{code}» на билет — "
+        f"{fmt_price(amount)} ₽ (применено: {applied})"
     )
 
 
 # ── Создание платежа за билет ────────────────────────────────────────────────
 @router.callback_query(F.data.startswith(f"{kb.TPAY_CREATE}:"))
 async def ticket_pay_create(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
-    # callback: tpay:create:{event_id}:{ticket_type}
-    _, _, event_id_raw, ttype = cb.data.split(":", 3)
-    event_id = int(event_id_raw)
+    # callback: tpay:create:{event_id}:{ticket_type}[:{promo_id}]
+    parts = cb.data.split(":")
+    event_id = int(parts[2])
+    ttype = parts[3]
+    promo_id = int(parts[4]) if len(parts) > 4 else None
     await cb.answer("Создаю платёж...")
     try:
         status, result = await tickets.start_ticket_payment(
@@ -173,6 +282,7 @@ async def ticket_pay_create(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> 
             event_id=event_id,
             ticket_type=ttype,
             return_url=await _return_url(bot),
+            promo_id=promo_id,
         )
     except YooKassaError:
         await _edit(cb, texts.PAY_CREATE_FAILED, kb.to_menu_kb())

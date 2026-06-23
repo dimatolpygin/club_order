@@ -5,12 +5,14 @@
 sync_ticket_payment вызывается и фоновым поллером (через payments.poll_pending —
 диспетчеризация по kind), и кнопкой «Проверить оплату».
 
-Скидки подписчику (этап 15) и промокоды (этап 16) здесь пока не применяются —
-билет оплачивается по полной цене типа из админки. Билет НЕ даёт доступ в группу.
+Скидка подписчику (этап 15) и промокод (этап 16) НЕ суммируются — берётся
+максимальная (меньшая итоговая цена, `ev.best_ticket_price`). На билетах работают
+только `percent`-промокоды; активация промокода расходуется только если он реально
+выиграл у скидки подписчика. Билет НЕ даёт доступ в группу.
 """
 from __future__ import annotations
 
-from decimal import Decimal
+from datetime import datetime, timezone
 
 import asyncpg
 from aiogram import Bot
@@ -19,8 +21,32 @@ from .. import repo, texts
 from ..logger import logger
 from ..utils import fmt_price
 from . import events as ev
+from . import promo as promo_service
 from .receipt import build_receipt
 from .yookassa import create_payment, get_payment, new_idempotence_key
+
+
+async def _promo_percent(
+    pool: asyncpg.Pool, promo_id: int | None, tg_id: int
+) -> tuple[int, asyncpg.Record | None]:
+    """Процент скидки действующего percent-промокода для этого юзера (этап 16).
+
+    Ревалидирует код в момент оплаты (источник истины). Возвращает (pct, promo):
+    pct=0, если промокода нет, он невалиден, исчерпан/просрочен, уже использован
+    этим юзером или имеет тип `fixed_price` (на билеты не распространяется).
+    """
+    if promo_id is None:
+        return 0, None
+    promo = await repo.get_promo(pool, promo_id)
+    if promo is None or promo["kind"] != promo_service.KIND_PERCENT:
+        return 0, None
+    already = await repo.user_redeemed_promo(pool, promo_id, tg_id)
+    status = promo_service.validate(
+        promo, now=datetime.now(timezone.utc), already_used=already
+    )
+    if status != promo_service.VALID:
+        return 0, None
+    return int(promo["value"]), promo
 
 
 async def start_ticket_payment(
@@ -30,8 +56,13 @@ async def start_ticket_payment(
     event_id: int,
     ticket_type: str,
     return_url: str,
+    promo_id: int | None = None,
 ) -> tuple[str, dict | None]:
     """Создаёт платёж ЮKassa за билет. Перепроверяет наличие мест перед оплатой.
+
+    Применяет лучшую из скидок (подписчик vs промокод, НЕ суммируются —
+    `ev.best_ticket_price`). promo_id привязывается к платежу только если промокод
+    реально выиграл (тогда при выдаче билета расходуется его активация).
 
     Возвращает (статус, данные):
       'ok' + dict   — платёж создан (payment_id, confirmation_url, amount);
@@ -54,8 +85,18 @@ async def start_ticket_payment(
     # Скидка участника клуба: активная подписка 11:11 + процент события (этап 15).
     # Источник истины для суммы платежа — проверка подписки здесь и сейчас.
     is_subscriber = await repo.get_active_subscription(pool, tg_id) is not None
-    discount_pct = event["subscriber_discount_percent"] if is_subscriber else 0
-    amount = ev.apply_discount(prices[ticket_type], discount_pct)
+    subscriber_pct = event["subscriber_discount_percent"] if is_subscriber else 0
+    # Промокод (этап 16): процент действующего percent-кода; макс. скидка не суммируется.
+    promo_pct, promo = await _promo_percent(pool, promo_id, tg_id)
+    amount, applied = ev.best_ticket_price(
+        prices[ticket_type], subscriber_pct=subscriber_pct, promo_pct=promo_pct
+    )
+    # Промокод привязываем к платежу только если он реально выиграл — иначе активация
+    # не расходуется (скидка подписчика дала ту же или большую выгоду).
+    applied_promo_id = promo_id if applied == "promo" else None
+    discount_pct = promo_pct if applied == "promo" else (
+        subscriber_pct if applied == "subscriber" else 0
+    )
     user = await repo.get_user(pool, tg_id)
     description = (
         f"Билет «{ev.ticket_label(ticket_type)}» на «{event['title']}»"
@@ -68,6 +109,8 @@ async def start_ticket_payment(
         "event_id": str(event_id),
         "ticket_type": ticket_type,
     }
+    if applied_promo_id is not None:
+        metadata["promo_id"] = str(applied_promo_id)
     payment = await create_payment(
         amount=amount,
         description=description,
@@ -92,8 +135,14 @@ async def start_ticket_payment(
         kind="ticket",
         event_id=event_id,
         ticket_type=ticket_type,
+        promo_id=applied_promo_id,
     )
-    disc_note = f", скидка подписчику {discount_pct}%" if discount_pct else ""
+    if applied == "promo":
+        disc_note = f", промокод {promo['code']} −{discount_pct}%"
+    elif applied == "subscriber":
+        disc_note = f", скидка подписчику {discount_pct}%"
+    else:
+        disc_note = ""
     logger.info(
         f"🎟 Платёж за билет создан: tg_id={tg_id}, событие #{event_id}, "
         f"{ticket_type}, {fmt_price(amount)} ₽{disc_note}, yk_id={yk_id}"

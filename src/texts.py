@@ -411,25 +411,77 @@ def event_card(
     )
 
 
-# Билет выбран — сводка перед оплатой. base_price задан → показываем скидку участника.
+# Билет выбран — сводка перед оплатой.
+# applied (этап 16): 'none' | 'subscriber' | 'promo' — какая скидка победила
+# (скидка участника и промокод НЕ суммируются, берётся максимальная).
 def event_ticket_summary(
     title: str, ticket_label: str, price: str,
     discount_pct: int = 0, base_price: str | None = None,
+    applied: str = "subscriber", promo_code: str | None = None,
+    promo_lost: bool = False,
 ) -> str:
-    if discount_pct > 0 and base_price is not None:
+    if discount_pct > 0 and base_price is not None and applied == "promo":
+        head = f"По промокоду {promo_code} −{discount_pct}%" if promo_code else f"Скидка −{discount_pct}%"
+        price_block = (
+            f"Цена: <s>{base_price} ₽</s>\n"
+            f"<b>{head}: {price} ₽</b>\n\n"
+        )
+    elif discount_pct > 0 and base_price is not None:  # applied == 'subscriber'
         price_block = (
             f"Цена: <s>{base_price} ₽</s>\n"
             f"<b>Со скидкой участника −{discount_pct}%: {price} ₽</b>\n\n"
         )
     else:
         price_block = f"<b>Стоимость: {price} ₽</b>\n\n"
+    # Промокод применён, но скидка участника оказалась не меньше — оставили её.
+    note = (
+        "<i>Промокод применён, но твоя скидка участника выгоднее — оставили её "
+        "(скидки не суммируются).</i>\n\n"
+        if promo_lost else ""
+    )
     return (
         "<b>ОФОРМЛЕНИЕ БИЛЕТА</b>\n\n"
         f"Событие: <b>{title}</b>\n"
         f"Тип билета: {ticket_label}\n"
         f"{price_block}"
+        f"{note}"
         "Нажми «Перейти к оплате» — откроется защищённая страница ЮKassa."
     )
+
+
+# Ввод промокода в флоу билета (этап 16).
+TICKET_PROMO_ENTER = (
+    "<b>ПРОМОКОД НА БИЛЕТ</b>\n\n"
+    "Отправь промокод сообщением.\n\n"
+    "Если он действует, пересчитаю цену билета. Скидка участника клуба и промокод "
+    "не складываются — оставлю ту, что выгоднее для тебя."
+)
+
+TICKET_PROMO_NOT_FOUND = (
+    "<b>Промокод не найден</b>\n\n"
+    "Проверь, пожалуйста, написание и попробуй ещё раз."
+)
+
+TICKET_PROMO_EXPIRED = (
+    "<b>Промокод больше не действует</b>\n\n"
+    "Срок действия кода истёк или он отключён."
+)
+
+TICKET_PROMO_EXHAUSTED = (
+    "<b>Промокод исчерпан</b>\n\n"
+    "Лимит активаций этого кода уже достигнут."
+)
+
+TICKET_PROMO_ALREADY_USED = (
+    "<b>Промокод уже использован</b>\n\n"
+    "Ты уже активировал этот код ранее."
+)
+
+TICKET_PROMO_SUB_ONLY = (
+    "<b>Промокод только для подписки</b>\n\n"
+    "Этот промокод действует на подписку в клуб «11:11», а на билеты не "
+    "распространяется. Можешь продолжить покупку билета без него."
+)
 
 
 # Платёж за билет создан — ждём оплату по ссылке.

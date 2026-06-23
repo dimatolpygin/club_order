@@ -197,6 +197,35 @@ def main() -> None:
     check("скидка округляется до копеек (ROUND_HALF_UP): 10% от 111 → 99.90",
           ev.apply_discount(111, 10), Decimal("99.90"))
 
+    # ── Стекинг: макс. скидка подписчик vs промокод (этап 16) ─────────────────
+    # Пример из ТЗ: 1000 ₽, подписка −10% (900) vs промокод −5% (950) → 900, подписка.
+    check("стекинг: подписка −10% выгоднее промокода −5% → 900 (subscriber)",
+          ev.best_ticket_price(1000, subscriber_pct=10, promo_pct=5),
+          (Decimal("900.00"), "subscriber"))
+    # Промокод выгоднее → берём промокод, активация расходуется.
+    check("стекинг: промокод −10% выгоднее подписки −5% → 900 (promo)",
+          ev.best_ticket_price(1000, subscriber_pct=5, promo_pct=10),
+          (Decimal("900.00"), "promo"))
+    # Нет подписки, только промокод.
+    check("стекинг: только промокод −10% → 900 (promo)",
+          ev.best_ticket_price(1000, subscriber_pct=0, promo_pct=10),
+          (Decimal("900.00"), "promo"))
+    # Только скидка подписчика.
+    check("стекинг: только подписка −10% → 900 (subscriber)",
+          ev.best_ticket_price(1000, subscriber_pct=10, promo_pct=0),
+          (Decimal("900.00"), "subscriber"))
+    # Скидок нет.
+    check("стекинг: нет скидок → полная цена (none)",
+          ev.best_ticket_price(1000), (Decimal("1000"), "none"))
+    # Равные скидки → предпочитаем подписку (не тратим активацию промокода).
+    check("стекинг: равные −10% → подписка (промокод не расходуется)",
+          ev.best_ticket_price(1000, subscriber_pct=10, promo_pct=10),
+          (Decimal("900.00"), "subscriber"))
+    # Скидки НЕ суммируются: −10% и −20% не дают −30% (800), берём только −20% (800).
+    check("стекинг: −10% и −20% НЕ суммируются → 800 (promo), не 720",
+          ev.best_ticket_price(1000, subscriber_pct=10, promo_pct=20),
+          (Decimal("800.00"), "promo"))
+
     print("\nВсе проверки пройдены.")
 
 

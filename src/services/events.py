@@ -177,6 +177,35 @@ def apply_discount(price: int | Decimal, percent: int) -> Decimal:
     return discounted.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def best_ticket_price(
+    price: int | Decimal, *, subscriber_pct: int = 0, promo_pct: int = 0
+) -> tuple[Decimal, str]:
+    """Лучшая цена билета: скидка подписчика и промокод НЕ суммируются (этап 16).
+
+    Берётся та скидка, что даёт МЕНЬШУЮ итоговую цену (большую выгоду клиенту).
+    Пример: 1000 ₽, подписка −10% (900) vs промокод −5% (950) → 900 ₽ (подписка).
+
+    Возвращает (итоговая_цена, applied), где applied:
+      'promo'      — выиграл промокод (расходуем активацию);
+      'subscriber' — выиграла скидка подписчика (промокод НЕ расходуется);
+      'none'       — ни одна скидка не уменьшает цену.
+
+    На равенстве предпочитаем скидку подписчика — чтобы не тратить активацию
+    промокода зря (одинаковую выгоду даёт и она). Обе скидки — проценты 0..100;
+    `fixed_price`-промокоды на билеты не применяются (фильтруется выше по стеку).
+    """
+    base = Decimal(str(price))
+    sub_price = apply_discount(base, subscriber_pct)
+    promo_price = apply_discount(base, promo_pct)
+    if promo_pct > 0 and promo_price < sub_price:
+        return promo_price, "promo"
+    if subscriber_pct > 0 and sub_price < base:
+        return sub_price, "subscriber"
+    if promo_pct > 0 and promo_price < base:
+        return promo_price, "promo"
+    return base, "none"
+
+
 def event_available(
     event: Mapping[str, Any],
     prices: Mapping[str, int],
