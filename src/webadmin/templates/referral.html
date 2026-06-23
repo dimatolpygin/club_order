@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Реферальная программа{% endblock %}
+{% block heading %}Реферальная программа{% endblock %}
+{% block content %}
+
+{% macro person(name, username, uid) -%}
+  {{ name or '—' }}
+  {%- if username %} <span class="muted">@{{ username }}</span>{% endif %}
+  <span class="muted">· id {{ uid }}</span>
+{%- endmacro %}
+
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+{% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
+
+<h2 class="section-title">Суммы (бани)</h2>
+<form method="post" action="/referral/settings" class="card form-grid">
+  <label>Скидка новичку, ₽
+    <input type="number" name="newbie_discount" min="0" step="1" value="{{ sums.newbie_discount }}">
+    <small class="muted">Скидка на первый билет на баню тому, кто пришёл по ссылке и ещё ничего не покупал.</small>
+  </label>
+  <label>Бонус пригласившему, ₽
+    <input type="number" name="referrer_bonus" min="0" step="1" value="{{ sums.referrer_bonus }}">
+    <small class="muted">Начисляется после даты бани. 1 бонус = 1 ₽, оплатить можно до 50% билета.</small>
+  </label>
+  <div><button type="submit" class="btn btn-primary">Сохранить суммы</button></div>
+</form>
+
+<h2 class="section-title">Ручное начисление / списание бонусов</h2>
+<form method="post" action="/referral/bonus" class="card form-grid">
+  <label>Telegram ID
+    <input type="number" name="tg_id" step="1" placeholder="например 2042819654" required>
+  </label>
+  <label>Сумма, ₽ (минус — списать)
+    <input type="number" name="amount" step="1" placeholder="1000 или -500" required>
+  </label>
+  <label>Комментарий (необязательно)
+    <input type="text" name="note" maxlength="200" placeholder="за что">
+  </label>
+  <div><button type="submit" class="btn btn-primary">Применить</button></div>
+</form>
+
+<h2 class="section-title">Цепочки приглашений</h2>
+{% if chains %}
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Пригласил</th><th>Новичок</th><th>Статус</th>
+        <th>Событие</th><th>Скидка / бонус</th><th>Создано</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in chains %}
+      <tr>
+        <td>{{ person(r.referrer_name, r.referrer_username, r.referrer_tg_id) }}</td>
+        <td>{{ person(r.invitee_name, r.invitee_username, r.invitee_tg_id) }}</td>
+        <td>
+          <span class="badge {{ 'badge-green' if r.status == 'accrued' else 'badge-blue' if r.status == 'qualified' else '' }}">
+            {{ status_labels.get(r.status, r.status) }}
+          </span>
+        </td>
+        <td>{{ r.event_title or '—' }}</td>
+        <td class="nowrap">
+          {%- if r.discount_amount is not none %}{{ r.discount_amount|int }} ₽ / {{ r.bonus_amount|int }} ₽
+          {%- else %}<span class="muted">—</span>{% endif -%}
+        </td>
+        <td class="nowrap">{{ r.created_at.strftime('%d.%m.%Y · %H:%M') }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty">Пока никто не приглашён. Ссылка выдаётся в боте командой /ссылка.</div>
+{% endif %}
+
+{% endblock %}
