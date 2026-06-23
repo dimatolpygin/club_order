@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import asyncpg
+from asyncpg.exceptions import UniqueViolationError
 
 from .utils import add_period
 
@@ -904,3 +905,282 @@ async def cancel_active_subscriptions(pool: asyncpg.Pool, tg_id: int) -> int:
         tg_id,
     )
     return len(rows)
+
+
+# ── Реферальная программа (referral_links / referrals / bonus_ledger, этап 17) ─
+async def get_or_create_referral_code(pool: asyncpg.Pool, tg_id: int, gen) -> str:
+    """Реф-код пользователя (создаёт при первом обращении). gen — генератор кандидата.
+
+    Коллизии кода крайне редки (8 символов из 31), но на всякий случай повторяем
+    генерацию; гонку по tg_id (параллельное создание) разрешаем чтением существующего.
+    """
+    existing = await pool.fetchrow(
+        "SELECT code FROM referral_links WHERE tg_id = $1", tg_id
+    )
+    if existing is not None:
+        return existing["code"]
+    for _ in range(10):
+        code = gen()
+        try:
+            await pool.execute(
+                "INSERT INTO referral_links(tg_id, code) VALUES($1, $2)", tg_id, code
+            )
+            return code
+        except UniqueViolationError:
+            row = await pool.fetchrow(
+                "SELECT code FROM referral_links WHERE tg_id = $1", tg_id
+            )
+            if row is not None:  # код по tg_id уже создан параллельно
+                return row["code"]
+            # иначе коллизия самого кода — пробуем другой
+    raise RuntimeError("не удалось сгенерировать уникальный реф-код")
+
+
+async def get_referral_link_owner(pool: asyncpg.Pool, code: str) -> int | None:
+    """tg_id владельца реф-кода (None — кода нет)."""
+    row = await pool.fetchrow(
+        "SELECT tg_id FROM referral_links WHERE code = $1", code
+    )
+    return row["tg_id"] if row is not None else None
+
+
+async def is_newbie(pool: asyncpg.Pool, tg_id: int) -> bool:
+    """Новичок = ещё ничего не покупал: ни подписки, ни оплаченного билета, ни платежа."""
+    row = await pool.fetchrow(
+        """
+        SELECT NOT EXISTS(SELECT 1 FROM subscriptions WHERE tg_id = $1)
+           AND NOT EXISTS(SELECT 1 FROM tickets WHERE tg_id = $1 AND status = 'paid')
+           AND NOT EXISTS(SELECT 1 FROM payments WHERE tg_id = $1 AND status = 'succeeded')
+           AS newbie
+        """,
+        tg_id,
+    )
+    return bool(row["newbie"])
+
+
+async def get_referral_by_invitee(pool: asyncpg.Pool, invitee_tg_id: int) -> asyncpg.Record | None:
+    """Реферальная связь, в которой пользователь — приглашённый (или None)."""
+    return await pool.fetchrow(
+        "SELECT * FROM referrals WHERE invitee_tg_id = $1", invitee_tg_id
+    )
+
+
+async def bind_referral(
+    pool: asyncpg.Pool, referrer_tg_id: int, invitee_tg_id: int
+) -> asyncpg.Record | None:
+    """Фиксирует связь «пригласивший→новичок» (status='pending'). Идемпотентно.
+
+    Возвращает созданную строку или None, если приглашённый уже привязан ранее
+    (первая привязка побеждает — uniq invitee_tg_id).
+    """
+    return await pool.fetchrow(
+        """
+        INSERT INTO referrals(referrer_tg_id, invitee_tg_id)
+        VALUES($1, $2)
+        ON CONFLICT (invitee_tg_id) DO NOTHING
+        RETURNING *
+        """,
+        referrer_tg_id,
+        invitee_tg_id,
+    )
+
+
+async def qualify_referral(
+    pool: asyncpg.Pool, *, invitee_tg_id: int, event_id: int,
+    discount_amount: int, bonus_amount: int,
+) -> asyncpg.Record | None:
+    """Квалифицирует связь при первой покупке бани новичком (pending → qualified).
+
+    Идемпотентно: обновляет только связь в статусе 'pending'. Суммы фиксируются
+    на момент покупки (последующая правка дефолтов задним числом не влияет).
+    Возвращает обновлённую строку или None (связи нет / уже квалифицирована).
+    """
+    return await pool.fetchrow(
+        """
+        UPDATE referrals
+        SET status = 'qualified', event_id = $2,
+            discount_amount = $3, bonus_amount = $4, qualified_at = now()
+        WHERE invitee_tg_id = $1 AND status = 'pending'
+        RETURNING *
+        """,
+        invitee_tg_id,
+        event_id,
+        Decimal(discount_amount),
+        Decimal(bonus_amount),
+    )
+
+
+async def bonus_balance(conn, tg_id: int) -> int:
+    """Баланс бонусов пользователя (SUM(delta), ₽). conn — pool или соединение."""
+    row = await conn.fetchrow(
+        "SELECT COALESCE(SUM(delta), 0) AS bal FROM bonus_ledger WHERE tg_id = $1",
+        tg_id,
+    )
+    return int(row["bal"])
+
+
+async def spend_bonuses(
+    pool: asyncpg.Pool, *, tg_id: int, payment_id: int, amount: int
+) -> bool:
+    """Списывает `amount` бонусов под платёж (delta<0). Защита от овердрафта и дублей.
+
+    Под advisory-локом по tg_id проверяет баланс и пишет строку reason='spend'
+    (уникальный частичный индекс по payment_id не даёт списать дважды на один платёж).
+    Возвращает True — списано; False — недостаточно бонусов или уже списано.
+    """
+    if amount <= 0:
+        return False
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", tg_id)
+            if await bonus_balance(conn, tg_id) < amount:
+                return False
+            row = await conn.fetchrow(
+                """
+                INSERT INTO bonus_ledger(tg_id, delta, reason, payment_id)
+                VALUES($1, $2, 'spend', $3)
+                ON CONFLICT (payment_id) WHERE reason = 'spend' DO NOTHING
+                RETURNING id
+                """,
+                tg_id,
+                Decimal(-amount),
+                payment_id,
+            )
+            return row is not None
+
+
+async def refund_bonuses(pool: asyncpg.Pool, payment_id: int) -> bool:
+    """Возвращает списанные под платёж бонусы (reason='refund'), если платёж не прошёл.
+
+    Идемпотентно: возвращает ровно раз и только если было списание под этот платёж.
+    True — бонусы возвращены этим вызовом.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            spend = await conn.fetchrow(
+                "SELECT tg_id, delta FROM bonus_ledger "
+                "WHERE payment_id = $1 AND reason = 'spend'",
+                payment_id,
+            )
+            if spend is None:
+                return False
+            already = await conn.fetchrow(
+                "SELECT 1 FROM bonus_ledger WHERE payment_id = $1 AND reason = 'refund'",
+                payment_id,
+            )
+            if already is not None:
+                return False
+            await conn.execute(
+                "INSERT INTO bonus_ledger(tg_id, delta, reason, payment_id, note) "
+                "VALUES($1, $2, 'refund', $3, 'возврат бонусов: платёж не прошёл')",
+                spend["tg_id"],
+                -spend["delta"],  # делаем delta положительной
+                payment_id,
+            )
+            return True
+
+
+async def accrue_referral_bonus(
+    pool: asyncpg.Pool, referral_id: int
+) -> asyncpg.Record | None:
+    """Начисляет пригласившему бонус по квалифицированной связи (этап 17, джоб).
+
+    Под блокировкой строки связи: только из 'qualified' → 'accrued', пишет
+    bonus_ledger(reason='referral_bonus') идемпотентно (уникальный индекс по
+    referral_id). Возвращает строку связи при начислении, иначе None.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            ref = await conn.fetchrow(
+                "SELECT * FROM referrals WHERE id = $1 AND status = 'qualified' FOR UPDATE",
+                referral_id,
+            )
+            if ref is None:
+                return None
+            inserted = await conn.fetchrow(
+                """
+                INSERT INTO bonus_ledger(tg_id, delta, reason, referral_id)
+                VALUES($1, $2, 'referral_bonus', $3)
+                ON CONFLICT (referral_id) WHERE reason = 'referral_bonus' DO NOTHING
+                RETURNING id
+                """,
+                ref["referrer_tg_id"],
+                ref["bonus_amount"],
+                referral_id,
+            )
+            await conn.execute(
+                "UPDATE referrals SET status = 'accrued', accrued_at = now() WHERE id = $1",
+                referral_id,
+            )
+            return ref if inserted is not None else ref
+
+
+async def referrals_due_for_accrual(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Квалифицированные связи, у которых дата события уже прошла — кандидаты на бонус.
+
+    Анти-возврат: бонус положен, только если билет приглашённого на это событие всё
+    ещё оплачен (не возвращён). Дату события берём из events.
+    """
+    return await pool.fetch(
+        """
+        SELECT r.id, r.referrer_tg_id, r.invitee_tg_id, r.event_id, r.bonus_amount,
+               e.starts_at, e.title
+        FROM referrals r
+        JOIN events e ON e.id = r.event_id
+        WHERE r.status = 'qualified' AND e.starts_at <= now()
+          AND EXISTS(
+              SELECT 1 FROM tickets t
+              WHERE t.tg_id = r.invitee_tg_id AND t.event_id = r.event_id
+                AND t.status = 'paid'
+          )
+        ORDER BY r.id
+        """
+    )
+
+
+async def void_referral(pool: asyncpg.Pool, referral_id: int) -> None:
+    """Аннулирует связь (возврат до события и т.п.): бонус не начисляется."""
+    await pool.execute(
+        "UPDATE referrals SET status = 'void' WHERE id = $1 AND status = 'qualified'",
+        referral_id,
+    )
+
+
+async def get_referral_chains(pool: asyncpg.Pool, limit: int = 200) -> list[asyncpg.Record]:
+    """Цепочки приглашений для админки: кто кого привёл, статус, суммы, имена."""
+    return await pool.fetch(
+        """
+        SELECT r.id, r.referrer_tg_id, r.invitee_tg_id, r.status,
+               r.discount_amount, r.bonus_amount, r.created_at, r.qualified_at, r.accrued_at,
+               ru.username AS referrer_username, ru.first_name AS referrer_name,
+               iu.username AS invitee_username, iu.first_name AS invitee_name,
+               e.title AS event_title
+        FROM referrals r
+        LEFT JOIN users ru ON ru.tg_id = r.referrer_tg_id
+        LEFT JOIN users iu ON iu.tg_id = r.invitee_tg_id
+        LEFT JOIN events e ON e.id = r.event_id
+        ORDER BY r.id DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+
+
+async def add_bonus_manual(
+    pool: asyncpg.Pool, *, tg_id: int, amount: int, note: str | None = None
+) -> int:
+    """Ручное начисление/списание бонусов из админки (delta может быть отрицательной).
+
+    Возвращает новый баланс. Списание не уводит баланс в минус (страховка в вызывающем).
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", tg_id)
+            await conn.execute(
+                "INSERT INTO bonus_ledger(tg_id, delta, reason, note) "
+                "VALUES($1, $2, 'manual', $3)",
+                tg_id,
+                Decimal(amount),
+                note,
+            )
+            return await bonus_balance(conn, tg_id)

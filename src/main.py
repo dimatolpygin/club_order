@@ -17,7 +17,7 @@ from .db import close_pool, init_pool
 from .handlers import get_main_router
 from .logger import setup_logging
 from .middlewares import LoggingMiddleware
-from .services import app_settings, payments, reminders, subscriptions
+from .services import app_settings, payments, referral_jobs, reminders, subscriptions
 
 
 async def main() -> None:
@@ -76,6 +76,17 @@ async def main() -> None:
         minutes=settings.reminder_check_interval_min,
         args=[pool, bot],
         id="send_reminders",
+        max_instances=1,
+        coalesce=True,
+    )
+    # Реферальные бонусы: после даты бани начисляем пригласившему (этап 17).
+    # Частоту берём как у проверки окончаний — отдельный инфра-параметр не вводим.
+    scheduler.add_job(
+        referral_jobs.run_referral_accrual,
+        "interval",
+        minutes=settings.expiry_check_interval_min,
+        args=[pool, bot],
+        id="accrue_referral_bonuses",
         max_instances=1,
         coalesce=True,
     )

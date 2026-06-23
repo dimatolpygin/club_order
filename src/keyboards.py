@@ -18,6 +18,7 @@ NAV_MYSUB = "nav:mysub"      # Моя подписка
 NAV_RENEW = "nav:renew"      # Продлить подписку
 NAV_PROMO = "nav:promo"      # Ввести промокод
 NAV_EVENTS = "nav:events"    # Мероприятия (билеты «Фокус.Энергия», этап 13)
+NAV_REFERRAL = "nav:referral"  # Пригласить друга / моя реф-ссылка (этап 17)
 
 # Префиксы callback'ов раздела мероприятий.
 EVT_OPEN = "evt"             # evt:{event_id} — открыть карточку события
@@ -30,6 +31,8 @@ TPAY_CHECK = "tpay:check"    # tpay:check:{yk_id} — проверить опл�
 TAGREE = "tagree"            # tagree:{ticket_id} — согласие с правилами → адрес
 # Промокод на билете (этап 16).
 TPROMO = "tpromo"            # tpromo:{event_id}:{ticket_type} — ввести промокод для билета
+# Оплата бонусами на билете (этап 17).
+TBONUS = "tbonus"            # tbonus:{event_id}:{ticket_type}:{promo_or_0}:{1|0} — тоггл бонусов
 
 def welcome_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
@@ -78,11 +81,23 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     )
     b.row(InlineKeyboardButton(text="Ввести промокод", callback_data=NAV_PROMO))
     b.row(InlineKeyboardButton(text="Мероприятия", callback_data=NAV_EVENTS))
+    b.row(InlineKeyboardButton(text="Пригласить друга", callback_data=NAV_REFERRAL))
     b.row(
         InlineKeyboardButton(text="Что внутри клуба", callback_data=NAV_ABOUT),
         InlineKeyboardButton(text="Правила клуба", callback_data=NAV_RULES),
     )
     b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
+    return b.as_markup()
+
+
+def referral_link_kb(share_url: str) -> InlineKeyboardMarkup:
+    """Экран реф-ссылки: поделиться (готовый текст приглашения) + в меню."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="Поделиться приглашением",
+        switch_inline_query=f" {share_url}",
+    ))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
     return b.as_markup()
 
 
@@ -214,18 +229,31 @@ def event_sold_out_kb(support_url: str | None) -> InlineKeyboardMarkup:
 
 
 def event_ticket_summary_kb(
-    event_id: int, ticket_type: str, promo_id: int | None = None
+    event_id: int, ticket_type: str, promo_id: int | None = None,
+    *, use_bonus: bool = False, bonus_cap: int = 0,
 ) -> InlineKeyboardMarkup:
-    """Сводка по билету: «Перейти к оплате» + «Ввести промокод» + «Назад».
+    """Сводка по билету: оплата + тоггл бонусов + промокод + «Назад».
 
-    promo_id (этап 16) — если промокод уже применён, он зашивается в callback оплаты
-    и кнопка предлагает ввести другой; иначе — обычная кнопка ввода промокода.
+    promo_id (этап 16) — применённый промокод зашивается в callback оплаты.
+    bonus_cap>0 (этап 17) — показываем тоггл «Списать бонусы»; use_bonus — текущее
+    состояние. Pay-callback несёт и промокод, и флаг бонусов (источник истины —
+    пересчёт при создании платежа).
     """
     b = InlineKeyboardBuilder()
-    pay_cb = f"{TPAY_CREATE}:{event_id}:{ticket_type}"
-    if promo_id is not None:
-        pay_cb += f":{promo_id}"
+    promo_part = promo_id if promo_id is not None else 0
+    pay_cb = f"{TPAY_CREATE}:{event_id}:{ticket_type}:{promo_part}:{1 if use_bonus else 0}"
     b.row(InlineKeyboardButton(text="Перейти к оплате", callback_data=pay_cb))
+    if bonus_cap > 0:
+        if use_bonus:
+            b.row(InlineKeyboardButton(
+                text="Не списывать бонусы",
+                callback_data=f"{TBONUS}:{event_id}:{ticket_type}:{promo_part}:0",
+            ))
+        else:
+            b.row(InlineKeyboardButton(
+                text=f"Списать бонусы (−{bonus_cap} ₽)",
+                callback_data=f"{TBONUS}:{event_id}:{ticket_type}:{promo_part}:1",
+            ))
     promo_label = "Ввести другой промокод" if promo_id is not None else "Ввести промокод"
     b.row(InlineKeyboardButton(
         text=promo_label, callback_data=f"{TPROMO}:{event_id}:{ticket_type}"

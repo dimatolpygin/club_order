@@ -411,39 +411,14 @@ def event_card(
     )
 
 
-# Билет выбран — сводка перед оплатой.
-# applied (этап 16): 'none' | 'subscriber' | 'promo' — какая скидка победила
-# (скидка участника и промокод НЕ суммируются, берётся максимальная).
-def event_ticket_summary(
-    title: str, ticket_label: str, price: str,
-    discount_pct: int = 0, base_price: str | None = None,
-    applied: str = "subscriber", promo_code: str | None = None,
-    promo_lost: bool = False,
-) -> str:
-    if discount_pct > 0 and base_price is not None and applied == "promo":
-        head = f"По промокоду {promo_code} −{discount_pct}%" if promo_code else f"Скидка −{discount_pct}%"
-        price_block = (
-            f"Цена: <s>{base_price} ₽</s>\n"
-            f"<b>{head}: {price} ₽</b>\n\n"
-        )
-    elif discount_pct > 0 and base_price is not None:  # applied == 'subscriber'
-        price_block = (
-            f"Цена: <s>{base_price} ₽</s>\n"
-            f"<b>Со скидкой участника −{discount_pct}%: {price} ₽</b>\n\n"
-        )
-    else:
-        price_block = f"<b>Стоимость: {price} ₽</b>\n\n"
-    # Промокод применён, но скидка участника оказалась не меньше — оставили её.
-    note = (
-        "<i>Промокод применён, но твоя скидка участника выгоднее — оставили её "
-        "(скидки не суммируются).</i>\n\n"
-        if promo_lost else ""
-    )
+# Билет выбран — сводка перед оплатой. price_block (готовый, с разбивкой по скидкам
+# и бонусам) и note собирает handlers.events — здесь только рамка экрана.
+def event_ticket_summary(title: str, ticket_label: str, price_block: str, note: str = "") -> str:
     return (
         "<b>ОФОРМЛЕНИЕ БИЛЕТА</b>\n\n"
         f"Событие: <b>{title}</b>\n"
         f"Тип билета: {ticket_label}\n"
-        f"{price_block}"
+        f"{price_block}\n"
         f"{note}"
         "Нажми «Перейти к оплате» — откроется защищённая страница ЮKassa."
     )
@@ -535,6 +510,14 @@ TICKET_SOLD_DURING = (
     "Напиши в поддержку — поможем с возвратом или подберём свободные места."
 )
 
+# Цена со скидкой получилась 0 ₽ — оплата не нужна, направляем в поддержку (редкий кейс).
+TICKET_FREE_SUPPORT = (
+    "<b>Билет получается бесплатным</b>\n\n"
+    "Со скидкой стоимость вышла в 0 ₽ — оформить через оплату не получится. "
+    "Напиши в поддержку, и мы выдадим билет вручную."
+)
+
+
 # Событие отменено/удалено к моменту подтверждения оплаты.
 TICKET_NO_EVENT = (
     "<b>Не получилось оформить билет</b>\n\n"
@@ -560,3 +543,33 @@ MY_SUB_NONE = (
     "Если раньше у тебя была зафиксированная цена, но подписка прервалась — "
     "старая цена больше не действует."
 )
+
+
+# ── Реферальная программа для бань (этап 17) ──────────────────────────────────
+def referral_link_screen(link: str, balance: int, newbie_discount: int) -> str:
+    """Экран «Пригласить друга»: ссылка, баланс бонусов, условия (бани)."""
+    bonus_line = (
+        f"Твои бонусы: <b>{balance} ₽</b> (1 бонус = 1 ₽, "
+        "можно оплатить до 50% стоимости билета на баню).\n\n"
+        if balance > 0
+        else "Бонусами можно оплатить до 50% стоимости билета на баню "
+             "(1 бонус = 1 ₽).\n\n"
+    )
+    return (
+        "<b>ПРИГЛАСИ ДРУГА НА БАНЮ</b>\n\n"
+        "Поделись ссылкой. Друг, который ещё ничего у нас не покупал, получит "
+        f"скидку <b>{newbie_discount} ₽</b> на первый билет на баню, а тебе после "
+        "бани начислим бонусы.\n\n"
+        f"{bonus_line}"
+        "Твоя ссылка:\n"
+        f"{link}"
+    )
+
+
+# Пришёл по реф-ссылке — фиксируем приглашение (показываем после /start).
+def referral_bound(newbie_discount: int) -> str:
+    return (
+        "<b>Ты пришёл по приглашению</b>\n\n"
+        f"На первый билет на баню будет скидка <b>{newbie_discount} ₽</b> — "
+        "она применится автоматически при оформлении."
+    )

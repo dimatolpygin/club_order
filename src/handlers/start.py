@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from aiogram import Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 import asyncpg
@@ -10,15 +10,47 @@ import asyncpg
 from .. import keyboards as kb
 from .. import repo, texts
 from ..logger import logger
+from ..services import app_settings
+from ..services import referral as ref
 
 router = Router()
 
 
+async def _try_bind_referral(pool: asyncpg.Pool, message: Message, code: str) -> None:
+    """Привязывает новичка к пригласившему по реф-коду (этап 17). Тихо игнорирует не-кейсы.
+
+    Привязываем, только если: код существует, это не сам пользователь, он ещё не
+    привязан и он новичок (ничего не покупал). Иначе — без эффекта.
+    """
+    invitee = message.from_user.id
+    referrer = await repo.get_referral_link_owner(pool, code)
+    if referrer is None or referrer == invitee:
+        return
+    if await repo.get_referral_by_invitee(pool, invitee) is not None:
+        return  # уже привязан раньше (первая привязка побеждает)
+    if not await repo.is_newbie(pool, invitee):
+        return  # скидка новичка — только тем, кто ещё ничего не покупал
+    bound = await repo.bind_referral(pool, referrer, invitee)
+    if bound is not None:
+        sums = await app_settings.referral_sums(pool)
+        await message.answer(texts.referral_bound(sums["newbie_discount"]))
+        logger.info(
+            f"🔗 Реферал: @{message.from_user.username or '—'} (id:{invitee}) "
+            f"привязан к пригласившему id:{referrer} по коду {code}"
+        )
+
+
 @router.message(CommandStart())
-async def cmd_start(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def cmd_start(
+    message: Message, pool: asyncpg.Pool, state: FSMContext, command: CommandObject
+) -> None:
     await state.clear()
     u = message.from_user
     await repo.upsert_user(pool, u.id, u.username, u.first_name)
+    # Реферальный deep-link: `/start ref_<code>` — привязываем новичка.
+    code = ref.parse_start_payload(command.args)
+    if code:
+        await _try_bind_referral(pool, message, code)
     await repo.set_fsm_state(pool, u.id, "screen:start")
     await message.answer(texts.WELCOME, reply_markup=kb.welcome_kb())
     logger.info(f"🤖 Бот → @{u.username or '—'}: приветствие /start")

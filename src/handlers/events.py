@@ -42,31 +42,66 @@ async def _subscriber_discount(pool: asyncpg.Pool, tg_id: int, event) -> int:
     return event["subscriber_discount_percent"] if is_subscriber else 0
 
 
-async def _ticket_summary_view(
-    pool: asyncpg.Pool, tg_id: int, event, ttype: str, prices, promo=None
-):
-    """Готовит (text, markup) сводки билета с лучшей скидкой (этап 16).
+def _price_block(pr: dict) -> str:
+    """Разбивка цены билета: скидка (зачёркнутая база) + бонусы + итог (этапы 15–17)."""
+    base = fmt_price(pr["base_price"])
+    disc = fmt_price(pr["price_after_discount"])
+    lines: list[str] = []
+    if pr["price_after_discount"] < pr["base_price"]:
+        applied = pr["applied"]
+        if applied == "promo":
+            label = f"По промокоду {pr['promo']['code']} −{pr['discount_pct']}%"
+        elif applied == "subscriber":
+            label = f"Скидка участника −{pr['discount_pct']}%"
+        elif applied == "referral":
+            label = f"Скидка новичка −{pr['referral_amount']} ₽"
+        else:
+            label = "Скидка"
+        lines.append(f"Цена: <s>{base} ₽</s>")
+        lines.append(f"<b>{label}: {disc} ₽</b>")
+    else:
+        lines.append(f"<b>Стоимость: {disc} ₽</b>")
+    if pr["bonus_used"]:
+        lines.append(f"Бонусами: <b>−{pr['bonus_used']} ₽</b>")
+        lines.append(f"<b>Итого к оплате: {fmt_price(pr['final'])} ₽</b>")
+    elif pr["bonus_cap"] > 0:
+        lines.append(
+            f"<i>Доступно бонусов: {pr['balance']} ₽ — можно списать до "
+            f"{pr['bonus_cap']} ₽ (до 50% цены)</i>"
+        )
+    return "\n".join(lines) + "\n"
 
-    Скидка участника и промокод НE суммируются — `ev.best_ticket_price` берёт ту,
-    что даёт меньшую цену. promo привязывается к оплате только если он выиграл.
+
+async def _ticket_summary_view(
+    pool: asyncpg.Pool, tg_id: int, event, ttype: str, prices,
+    *, promo_id: int | None = None, use_bonus: bool = False,
+):
+    """Готовит (text, markup, pr) сводки билета (этапы 15–17).
+
+    Скидки (подписчик/промокод/новичок) НЕ суммируются — берётся максимальная;
+    бонусы добивают цену (≤50%). Расчёт — единый `tickets.compute_ticket_pricing`
+    (тот же, что при создании платежа), поэтому показ и оплата всегда совпадают.
     """
-    base = prices[ttype]
-    subscriber_pct = await _subscriber_discount(pool, tg_id, event)
-    promo_pct = int(promo["value"]) if promo is not None else 0
-    amount, applied = ev.best_ticket_price(
-        base, subscriber_pct=subscriber_pct, promo_pct=promo_pct
+    pr = await tickets.compute_ticket_pricing(
+        pool, tg_id=tg_id, event=event, ticket_type=ttype,
+        base_price=prices[ttype], promo_id=promo_id, use_bonus=use_bonus,
     )
-    discount_pct = {"promo": promo_pct, "subscriber": subscriber_pct}.get(applied, 0)
-    promo_lost = promo is not None and applied != "promo"
-    promo_id = promo["id"] if (promo is not None and applied == "promo") else None
+    # Промокод введён, но выгоднее другая скидка — поясняем (его не применяем).
+    note = ""
+    if promo_id is not None and pr["applied"] != "promo" and pr["promo"] is not None:
+        note = (
+            "<i>Промокод применён, но другая скидка выгоднее — оставили её "
+            "(скидки не суммируются).</i>\n\n"
+        )
     text = texts.event_ticket_summary(
-        event["title"], ev.ticket_label(ttype), fmt_price(amount),
-        discount_pct, fmt_price(base) if discount_pct else None,
-        applied=applied, promo_code=(promo["code"] if promo is not None else None),
-        promo_lost=promo_lost,
+        event["title"], ev.ticket_label(ttype), _price_block(pr), note
     )
-    markup = kb.event_ticket_summary_kb(event["id"], ttype, promo_id)
-    return text, markup, amount, applied
+    applied_promo_id = pr["applied_promo_id"]
+    markup = kb.event_ticket_summary_kb(
+        event["id"], ttype, applied_promo_id,
+        use_bonus=use_bonus and pr["bonus_used"] > 0, bonus_cap=pr["bonus_cap"],
+    )
+    return text, markup, pr
 
 
 # ── Список мероприятий ───────────────────────────────────────────────────────
@@ -176,13 +211,13 @@ async def choose_ticket(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
         return
 
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:ticket:{event_id}:{ttype}")
-    text, markup, amount, applied = await _ticket_summary_view(
+    text, markup, pr = await _ticket_summary_view(
         pool, cb.from_user.id, event, ttype, prices
     )
     await _edit(cb, text, markup)
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: выбран билет {ttype} на "
-        f"«{event['title']}» — {fmt_price(amount)} ₽ (скидка: {applied})"
+        f"«{event['title']}» — {fmt_price(pr['final'])} ₽ (скидка: {pr['applied']})"
     )
 
 
@@ -255,25 +290,57 @@ async def ticket_promo_entered(
         )
         return
 
-    text, markup, amount, applied = await _ticket_summary_view(
-        pool, message.from_user.id, event, ttype, prices, promo
+    text, markup, pr = await _ticket_summary_view(
+        pool, message.from_user.id, event, ttype, prices, promo_id=promo["id"]
     )
     await repo.set_fsm_state(pool, message.from_user.id, f"screen:ticket:{event_id}:{ttype}")
     await message.answer(text, reply_markup=markup)
     logger.info(
         f"🤖 Бот → @{message.from_user.username or '—'}: промокод «{code}» на билет — "
-        f"{fmt_price(amount)} ₽ (применено: {applied})"
+        f"{fmt_price(pr['final'])} ₽ (применено: {pr['applied']})"
+    )
+
+
+# ── Тоггл оплаты бонусами на сводке билета (этап 17) ─────────────────────────
+def _parse_promo_part(raw: str) -> int | None:
+    """promo_id из callback (0 — нет промокода)."""
+    val = int(raw)
+    return val if val != 0 else None
+
+
+@router.callback_query(F.data.startswith(f"{kb.TBONUS}:"))
+async def ticket_bonus_toggle(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
+    # callback: tbonus:{event_id}:{ticket_type}:{promo_or_0}:{1|0}
+    _, event_id_raw, ttype, promo_raw, flag = cb.data.split(":", 4)
+    event_id = int(event_id_raw)
+    event = await repo.get_event(pool, event_id)
+    if event is None or not event["is_active"]:
+        await _edit(cb, texts.EVENTS_NONE, kb.to_menu_kb())
+        return
+    prices = await repo.get_event_prices(pool, event_id)
+    if ttype not in prices or not ev.has_seats(event, ttype):
+        await cb.answer("Мест нет на этот тип билета.", show_alert=True)
+        return
+    text, markup, pr = await _ticket_summary_view(
+        pool, cb.from_user.id, event, ttype, prices,
+        promo_id=_parse_promo_part(promo_raw), use_bonus=(flag == "1"),
+    )
+    await _edit(cb, text, markup)
+    logger.info(
+        f"🤖 Бот → @{cb.from_user.username or '—'}: бонусы {'вкл' if flag == '1' else 'выкл'} "
+        f"на билет — итого {fmt_price(pr['final'])} ₽"
     )
 
 
 # ── Создание платежа за билет ────────────────────────────────────────────────
 @router.callback_query(F.data.startswith(f"{kb.TPAY_CREATE}:"))
 async def ticket_pay_create(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
-    # callback: tpay:create:{event_id}:{ticket_type}[:{promo_id}]
+    # callback: tpay:create:{event_id}:{ticket_type}:{promo_or_0}:{1|0}
     parts = cb.data.split(":")
     event_id = int(parts[2])
     ttype = parts[3]
-    promo_id = int(parts[4]) if len(parts) > 4 else None
+    promo_id = _parse_promo_part(parts[4]) if len(parts) > 4 else None
+    use_bonus = len(parts) > 5 and parts[5] == "1"
     await cb.answer("Создаю платёж...")
     try:
         status, result = await tickets.start_ticket_payment(
@@ -283,6 +350,7 @@ async def ticket_pay_create(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> 
             ticket_type=ttype,
             return_url=await _return_url(bot),
             promo_id=promo_id,
+            use_bonus=use_bonus,
         )
     except YooKassaError:
         await _edit(cb, texts.PAY_CREATE_FAILED, kb.to_menu_kb())
@@ -291,6 +359,15 @@ async def ticket_pay_create(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> 
     if status == "no_seats":
         url = await app_settings.support_url(pool)
         await _edit(cb, texts.EVENT_SOLD_OUT, kb.event_sold_out_kb(url or None))
+        return
+    if status == "bonus_failed":
+        await cb.answer(
+            "Не удалось списать бонусы — баланс изменился. Открой билет заново.",
+            show_alert=True,
+        )
+        return
+    if status == "free":
+        await _edit(cb, texts.TICKET_FREE_SUPPORT, kb.to_menu_kb())
         return
     if status != "ok" or result is None:
         await _edit(cb, texts.EVENTS_NONE, kb.to_menu_kb())
