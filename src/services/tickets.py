@@ -231,6 +231,50 @@ async def start_ticket_payment(
     }
 
 
+async def cancel_ticket_payment(
+    pool: asyncpg.Pool, bot: Bot, yk_id: str
+) -> tuple[str, asyncpg.Record | None]:
+    """Отмена незавершённого платежа за билет пользователем (этап 17 — фикс бонусов).
+
+    Сразу возвращает списанные бонусы, чтобы они не «сгорали» при отказе от оплаты.
+    Перед отменой сверяет статус в ЮKassa: если платёж уже оплачен — НЕ отменяем,
+    а выдаём билет (оплату не теряем). Возвращает:
+      'succeeded' + билет — оказалось уже оплачено, билет выдан;
+      'canceled'          — платёж отменён (бонусов к возврату не было);
+      'canceled_refunded' — платёж отменён, бонусы возвращены на счёт;
+      'not_found'         — платёж не найден.
+    """
+    payment = await repo.get_payment_by_yk_id(pool, yk_id)
+    if payment is None:
+        return "not_found", None
+    if payment["status"] == "succeeded":
+        ticket = (
+            await repo.get_ticket(pool, payment["ticket_id"])
+            if payment["ticket_id"] is not None else None
+        )
+        return "succeeded", ticket
+    if payment["status"] in ("canceled", "refund_due"):
+        return "canceled", None
+
+    # Платёж ещё pending — убеждаемся, что он действительно не оплачен.
+    from .yookassa import YooKassaError
+    try:
+        data = await get_payment(yk_id)
+        status = data.get("status")
+    except YooKassaError:
+        status = None  # ЮKassa недоступна — считаем неоплаченным (пользователь сам отменил)
+    if status == "succeeded":
+        return await sync_ticket_payment(pool, bot, payment, notify=False)
+
+    await repo.mark_payment_canceled(pool, yk_id)
+    refunded = await repo.refund_bonuses(pool, payment["id"])
+    logger.info(
+        f"🚫 Платёж за билет отменён пользователем (tg_id={payment['tg_id']}, yk_id={yk_id}), "
+        f"бонусы возвращены={refunded}"
+    )
+    return ("canceled_refunded" if refunded else "canceled"), None
+
+
 async def sync_ticket_payment(
     pool: asyncpg.Pool, bot: Bot, payment: asyncpg.Record, *, notify: bool = True
 ) -> tuple[str, asyncpg.Record | None]:

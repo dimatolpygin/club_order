@@ -28,6 +28,7 @@ EVT_FULL = "evtfull"         # тап по типу без мест — попа
 # tpay:create:{event_id}:{ticket_type}[:{promo_id}] — создать платёж (promo_id опц., этап 16)
 TPAY_CREATE = "tpay:create"
 TPAY_CHECK = "tpay:check"    # tpay:check:{yk_id} — проверить оплату билета
+TPAY_CANCEL = "tpay:cancel"  # tpay:cancel:{yk_id} — отменить платёж + вернуть бонусы (этап 17)
 TAGREE = "tagree"            # tagree:{ticket_id} — согласие с правилами → адрес
 # Промокод на билете (этап 16).
 TPROMO = "tpromo"            # tpromo:{event_id}:{ticket_type} — ввести промокод для билета
@@ -285,12 +286,24 @@ def ticket_promo_retry_kb(event_id: int, ticket_type: str) -> InlineKeyboardMark
 
 
 def ticket_pay_kb(confirmation_url: str | None, yk_id: str, event_id: int) -> InlineKeyboardMarkup:
-    """Экран оплаты билета: «Оплатить» (ссылка) + «Проверить оплату» + «Отмена»."""
+    """Экран оплаты билета: «Оплатить» (ссылка) + «Проверить оплату» + «Отмена».
+
+    «Отмена» отменяет незавершённый платёж и возвращает списанные бонусы (этап 17),
+    а не просто уводит назад — иначе зарезервированные бонусы «зависали» бы до таймаута.
+    """
     b = InlineKeyboardBuilder()
     if confirmation_url:
         b.row(InlineKeyboardButton(text="Оплатить", url=confirmation_url))
     b.row(InlineKeyboardButton(text="Проверить оплату", callback_data=f"{TPAY_CHECK}:{yk_id}"))
-    b.row(InlineKeyboardButton(text="Отмена", callback_data=f"{EVT_OPEN}:{event_id}"))
+    b.row(InlineKeyboardButton(text="Отмена", callback_data=f"{TPAY_CANCEL}:{yk_id}"))
+    return b.as_markup()
+
+
+def ticket_canceled_kb(event_id: int) -> InlineKeyboardMarkup:
+    """После отмены платежа: вернуться к билетам события + в меню."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Вернуться к билетам", callback_data=f"{EVT_OPEN}:{event_id}"))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
     return b.as_markup()
 
 

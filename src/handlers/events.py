@@ -416,6 +416,38 @@ async def ticket_pay_check(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> N
         await cb.answer(texts.PAY_STILL_PENDING, show_alert=True)
 
 
+# ── Отмена платежа за билет (возврат бонусов) ────────────────────────────────
+@router.callback_query(F.data.startswith(f"{kb.TPAY_CANCEL}:"))
+async def ticket_pay_cancel(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
+    yk_id = cb.data.split(":", 2)[2]
+    status, ticket = await tickets.cancel_ticket_payment(pool, bot, yk_id)
+    # Платёж оказался уже оплаченным — выдаём билет, отмену не делаем.
+    if status == "succeeded" and ticket is not None:
+        event = await repo.get_event(pool, ticket["event_id"])
+        await repo.set_fsm_state(pool, cb.from_user.id, "screen:ticket:paid")
+        await _edit(
+            cb,
+            texts.ticket_success(
+                event["title"], ev.ticket_label(ticket["ticket_type"]),
+                event["starts_at"], event["rules_text"],
+            ),
+            kb.ticket_rules_kb(ticket["id"]),
+        )
+        await cb.answer("Платёж уже оплачен — билет выдан.")
+        return
+
+    payment = await repo.get_payment_by_yk_id(pool, yk_id)
+    event_id = payment["event_id"] if payment is not None else None
+    refunded = status == "canceled_refunded"
+    await repo.set_fsm_state(pool, cb.from_user.id, "screen:ticket:canceled")
+    markup = kb.ticket_canceled_kb(event_id) if event_id is not None else kb.to_menu_kb()
+    await _edit(cb, texts.ticket_pay_canceled(refunded), markup)
+    logger.info(
+        f"🤖 Бот → @{cb.from_user.username or '—'}: отмена оплаты билета "
+        f"(yk_id={yk_id}, бонусы возвращены={refunded})"
+    )
+
+
 # ── Согласие с правилами → показать адрес ────────────────────────────────────
 @router.callback_query(F.data.startswith(f"{kb.TAGREE}:"))
 async def ticket_show_address(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
