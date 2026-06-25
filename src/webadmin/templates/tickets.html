@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Билеты{% endblock %}
+{% block heading %}Билеты{% endblock %}
+{% block content %}
+
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+{% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
+
+{# ── Фильтр по событию ──────────────────────────────────────────────────── #}
+<form class="filter-bar" method="get" action="/tickets">
+  <label class="field-label" for="event_id">Событие:</label>
+  <select class="input" id="event_id" name="event_id" onchange="this.form.submit()">
+    <option value="">Все события</option>
+    {% for e in events %}
+      <option value="{{ e.id }}"{% if selected_event == e.id %} selected{% endif %}>
+        {{ kind_label.get(e.kind, e.kind) }} · {{ e.title }} ({{ e.starts_at.strftime('%d.%m.%Y') }})
+      </option>
+    {% endfor %}
+  </select>
+  <noscript><button type="submit" class="btn btn-light btn-sm">Показать</button></noscript>
+</form>
+
+<h2 class="section-title">Проданные билеты ({{ tickets|length }})</h2>
+
+{% if tickets %}
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Куплен</th><th>Событие</th><th>Покупатель</th>
+        <th>Тип</th><th>Цена</th><th>Статус</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for t in tickets %}
+      <tr class="{{ 'row-hidden' if t.status == 'refunded' else '' }}">
+        <td class="nowrap">{{ t.created_at.strftime('%d.%m.%Y · %H:%M') }}</td>
+        <td>
+          {{ kind_label.get(t.kind, t.kind) }} · {{ t.title }}
+          <span class="muted">{{ t.starts_at.strftime('%d.%m.%Y') }}</span>
+        </td>
+        <td>
+          {{ t.first_name or '—' }}
+          {%- if t.username %} <span class="muted">@{{ t.username }}</span>{% endif %}
+          <span class="muted">· id {{ t.tg_id }}</span>
+        </td>
+        <td class="nowrap">{{ type_label.get(t.ticket_type, t.ticket_type) }}</td>
+        <td class="nowrap">{{ t.price|int }} ₽</td>
+        <td class="nowrap">
+          {% if t.status == 'refunded' %}
+            <span class="badge badge-danger">возвращён</span>
+            <div class="muted">{{ t.refunded_at.strftime('%d.%m.%Y %H:%M') if t.refunded_at }}{% if t.refunded_by %} · {{ t.refunded_by }}{% endif %}</div>
+          {% elif t.refund_requested %}
+            <span class="badge badge-green">оплачен</span>
+            <span class="pill pill-danger">возврат запрошен</span>
+          {% else %}
+            <span class="badge badge-green">оплачен</span>
+          {% endif %}
+        </td>
+        <td class="nowrap">
+          {% if t.status == 'paid' %}
+          <form method="post" action="/tickets/{{ t.id }}/refund"
+                onsubmit="return confirm('Отметить билет #{{ t.id }} ({{ t.first_name or t.tg_id }}) как возвращённый? Подтверждайте только после того, как вернули деньги переводом. Место освободится, билет уйдёт из «Моих билетов».');">
+            <input type="hidden" name="event_id" value="{{ selected_event or '' }}">
+            <button type="submit" class="btn btn-sm btn-danger">Отметить возврат</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted">Деньги возвращает менеджер вручную переводом — кнопка лишь фиксирует факт
+возврата. После отметки место освобождается, билет исчезает из «Моих билетов» у пользователя,
+а реф-связь (если возврат до начисления бонуса) аннулируется.</p>
+{% else %}
+<div class="empty">{% if selected_event %}По выбранному событию билетов нет.{% else %}Проданных билетов пока нет.{% endif %}</div>
+{% endif %}
+
+{% endblock %}

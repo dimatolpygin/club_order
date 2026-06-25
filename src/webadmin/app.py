@@ -26,6 +26,7 @@ from .menu_buttons import router as menu_buttons_router
 from .referral import router as referral_router
 from .stats import router as stats_router
 from .subscriptions import router as subscriptions_router
+from .tickets import router as tickets_router
 
 _HERE = Path(__file__).resolve().parent
 
@@ -39,6 +40,7 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 app.include_router(stats_router)
 app.include_router(events_router)
+app.include_router(tickets_router)
 app.include_router(referral_router)
 app.include_router(subscriptions_router)
 app.include_router(menu_buttons_router)

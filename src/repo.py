@@ -710,6 +710,82 @@ async def set_ticket_rules_agreed(pool: asyncpg.Pool, ticket_id: int) -> None:
     )
 
 
+# ── Отметка фактического возврата билета (этап 21) ────────────────────────────
+async def list_sold_tickets(
+    pool: asyncpg.Pool, event_id: int | None = None
+) -> list[asyncpg.Record]:
+    """Проданные билеты для веб-админки: оплаченные и уже возвращённые.
+
+    Опциональный фильтр по событию. К каждому билету подтягиваем покупателя и
+    событие. Сортировка: сначала запрошенные на возврат (требуют действия), затем
+    свежие по дате покупки.
+    """
+    return await pool.fetch(
+        """
+        SELECT t.id, t.tg_id, t.ticket_type, t.price, t.status,
+               t.refund_requested, t.refund_requested_at,
+               t.refunded_at, t.refunded_by, t.created_at,
+               u.username, u.first_name,
+               e.id AS event_id, e.title, e.kind, e.starts_at
+        FROM tickets t
+        JOIN events e ON e.id = t.event_id
+        LEFT JOIN users u ON u.tg_id = t.tg_id
+        WHERE t.status IN ('paid', 'refunded')
+          AND ($1::bigint IS NULL OR t.event_id = $1)
+        ORDER BY (t.status = 'paid' AND t.refund_requested) DESC,
+                 t.created_at DESC
+        """,
+        event_id,
+    )
+
+
+async def mark_ticket_refunded(
+    pool: asyncpg.Pool, ticket_id: int, by: str
+) -> dict | None:
+    """Отмечает фактический возврат билета (менеджер вернул деньги вручную).
+
+    Атомарно: статус 'paid'→'refunded' + аудит (refunded_at, refunded_by). Перевод
+    освобождает место (занятость считается по 'paid') и убирает билет из «Моих
+    билетов». Анти-возврат рефералки (этап 17): если приглашённый вернул билет на
+    баню, по которой связь ещё лишь 'qualified' (бонус не начислен) — аннулируем её,
+    чтобы джоб не начислил бонус пригласившему.
+
+    Возвращает None, если билет не найден или уже возвращён; иначе dict с tg_id,
+    event_id и флагом referral_voided.
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                UPDATE tickets
+                SET status = 'refunded', refunded_at = now(), refunded_by = $2
+                WHERE id = $1 AND status = 'paid'
+                RETURNING tg_id, event_id
+                """,
+                ticket_id, by,
+            )
+            if row is None:
+                return None
+            voided = False
+            ref = await conn.fetchrow(
+                "SELECT id, status FROM referrals "
+                "WHERE invitee_tg_id = $1 AND event_id = $2",
+                row["tg_id"], row["event_id"],
+            )
+            if ref is not None and ref["status"] == "qualified":
+                await conn.execute(
+                    "UPDATE referrals SET status = 'void' "
+                    "WHERE id = $1 AND status = 'qualified'",
+                    ref["id"],
+                )
+                voided = True
+            return {
+                "tg_id": row["tg_id"],
+                "event_id": row["event_id"],
+                "referral_voided": voided,
+            }
+
+
 # ── Уведомления по событиям (event_notifications, этап 20) ────────────────────
 async def events_due_day_reminder(
     pool: asyncpg.Pool, before_ts: datetime
