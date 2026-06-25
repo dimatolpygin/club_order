@@ -34,19 +34,22 @@ async def _render(request: Request, *, event_id: int | None, open_thread: int | 
     pool = get_pool()
     tickets = await repo.list_sold_tickets(pool, event_id)
     events = await events_repo.list_events(pool)
-    # Переписка для раскрытой карточки (по tg_id билета).
+    # Переписка для раскрытой карточки (по tg_id билета). Открытие = прочтение входящих.
     thread = []
     if open_thread is not None:
         t = next((x for x in tickets if x["id"] == open_thread), None)
         if t is not None:
+            await repo.mark_inbound_read(pool, t["tg_id"])
             thread = await repo.manager_thread(pool, t["tg_id"])
+    unread = await repo.unread_inbound_by_user(pool)
     return templates.TemplateResponse(
         request, "tickets.html",
         {
             "active": "tickets", "admin": request.session.get("admin"),
             "tickets": tickets, "events": events, "selected_event": event_id,
             "type_label": TICKET_TYPE_LABELS, "kind_label": KIND_LABELS,
-            "open_thread": open_thread, "thread": thread,
+            "open_thread": open_thread, "thread": thread, "unread": unread,
+            "total_unread": sum(unread.values()),
             "error": error, "ok": ok,
         },
         status_code=status,

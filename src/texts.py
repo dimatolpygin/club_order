@@ -558,24 +558,6 @@ def manager_message_to_user(text: str) -> str:
     )
 
 
-def manager_inbound_to_admins(
-    first_name: str | None, username: str | None, tg_id: int,
-    text: str, tickets_note: str = "",
-) -> str:
-    """Ответ покупателя боту, пересылаемый админам (этап 21.1)."""
-    who = first_name or "—"
-    uname = f" @{username}" if username else " (без username)"
-    link = f'\n<a href="tg://user?id={tg_id}">открыть профиль</a>'
-    note = f"\nБилеты: {tickets_note}" if tickets_note else ""
-    return (
-        "<b>ОТВЕТ ОТ ПОКУПАТЕЛЯ</b>\n\n"
-        f"От: {who}{uname} · id {tg_id}{note}\n\n"
-        f"{text}\n"
-        f"{link}\n\n"
-        "<i>Ответить можно из веб-админки (раздел «Билеты» → «Написать через бота»).</i>"
-    )
-
-
 def refund_done(kind_label: str, title: str, starts_at) -> str:
     """Уведомление пользователю о произведённом возврате (этап 21.1)."""
     return (

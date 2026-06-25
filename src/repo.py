@@ -906,6 +906,32 @@ async def user_ticket_titles(pool: asyncpg.Pool, tg_id: int) -> list[str]:
     return [r["title"] for r in rows]
 
 
+async def unread_inbound_by_user(pool: asyncpg.Pool) -> dict[int, int]:
+    """Число непрочитанных ответов покупателей по каждому tg_id — для пометок в списке."""
+    rows = await pool.fetch(
+        "SELECT tg_id, count(*) AS c FROM manager_messages "
+        "WHERE direction = 'in' AND is_read = false GROUP BY tg_id"
+    )
+    return {r["tg_id"]: r["c"] for r in rows}
+
+
+async def total_unread_inbound(pool: asyncpg.Pool) -> int:
+    """Всего непрочитанных ответов покупателей (для счётчика в разделе)."""
+    val = await pool.fetchval(
+        "SELECT count(*) FROM manager_messages WHERE direction = 'in' AND is_read = false"
+    )
+    return int(val or 0)
+
+
+async def mark_inbound_read(pool: asyncpg.Pool, tg_id: int) -> None:
+    """Помечает входящие сообщения покупателя прочитанными (при открытии переписки)."""
+    await pool.execute(
+        "UPDATE manager_messages SET is_read = true "
+        "WHERE tg_id = $1 AND direction = 'in' AND is_read = false",
+        tg_id,
+    )
+
+
 # ── Уведомления по событиям (event_notifications, этап 20) ────────────────────
 async def events_due_day_reminder(
     pool: asyncpg.Pool, before_ts: datetime

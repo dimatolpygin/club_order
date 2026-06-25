@@ -330,3 +330,4 @@ html, body {
 .msg-text { font-size: 14px; white-space: pre-wrap; }
 .msg-meta { font-size: 11px; color: var(--ink-soft); margin-top: 4px; }
 .thread-compose { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.pill-unread { color: #fff; background: var(--blue); font-weight: 700; }

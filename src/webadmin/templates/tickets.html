@@ -59,7 +59,7 @@
   {% endif %}
 {% endif %}
 
-<h2 class="section-title">Проданные билеты ({{ tickets|length }})</h2>
+<h2 class="section-title">Проданные билеты ({{ tickets|length }}){% if total_unread %} · <span class="pill pill-unread">новых ответов: {{ total_unread }}</span>{% endif %}</h2>
 
 {% if tickets %}
 <div class="table-wrap">
@@ -107,7 +107,7 @@
           {% endif %}
         </td>
         <td class="nowrap actions">
-          <a class="btn btn-sm btn-light" href="/tickets?event_id={{ selected_event or '' }}&thread={{ t.id }}">Написать</a>
+          <a class="btn btn-sm {% if unread.get(t.tg_id) %}btn-primary{% else %}btn-light{% endif %}" href="/tickets?event_id={{ selected_event or '' }}&thread={{ t.id }}">Написать{% if unread.get(t.tg_id) %} · новый ответ ({{ unread.get(t.tg_id) }}){% endif %}</a>
           {% if t.status == 'paid' %}
           <form method="post" action="/tickets/{{ t.id }}/refund" class="inline"
                 onsubmit="return confirm('Отметить билет #{{ t.id }} ({{ t.first_name or t.tg_id }}) как возвращённый? Подтверждайте только после того, как вернули деньги переводом. Место освободится, билет уйдёт из «Моих билетов».');">
