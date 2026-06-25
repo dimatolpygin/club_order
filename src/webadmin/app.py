@@ -16,6 +16,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from ..cache import close_redis, init_redis
 from ..config import settings
 from ..db import close_pool, get_pool, init_pool
 from ..logger import logger, setup_logging
@@ -27,6 +28,7 @@ from .referral import router as referral_router
 from .screens import router as screens_router
 from .stats import router as stats_router
 from .subscriptions import router as subscriptions_router
+from .tariffs import router as tariffs_router
 from .tickets import router as tickets_router
 
 _HERE = Path(__file__).resolve().parent
@@ -44,6 +46,7 @@ app.include_router(events_router)
 app.include_router(tickets_router)
 app.include_router(referral_router)
 app.include_router(subscriptions_router)
+app.include_router(tariffs_router)
 app.include_router(screens_router)
 # Старый раздел «Кнопки меню» (этап 19) свёрнут в «Экраны бота» (этап 22): пункт меню
 # убран из навигации, но роутер оставлен для прямых ссылок/закладок.
@@ -60,6 +63,8 @@ async def _redirect_to_login(request: Request, exc: NotAuthenticated):
 async def _startup() -> None:
     setup_logging(settings.log_level)
     pool = await init_pool()
+    # Redis нужен для инвалидации кеша тарифов при правке из веба (этап 23).
+    await init_redis()
 
     # Миграции применяет бот (src.migrate). Ждём появления таблицы admin_users,
     # чтобы не гонять Alembic из двух процессов одновременно.
@@ -79,6 +84,7 @@ async def _startup() -> None:
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     await close_pool()
+    await close_redis()
 
 
 async def _seed_first_admin(pool) -> None:

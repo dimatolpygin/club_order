@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Тарифы{% endblock %}
+{% block heading %}Тарифы{% endblock %}
+{% block content %}
+
+{% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<h3 class="section-title">Ценовые ступени</h3>
+<p class="muted">Брекеты по числу занятых мест. Текущая ставка выбирается автоматически по
+количеству участников — пользователь видит только длительности и итоговую цену. Правки
+применяются в боте сразу.</p>
+
+<div class="card">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Ступень</th><th>Ставка ₽/мес</th><th>Лимит мест</th><th>Занято</th><th>Статус</th><th></th></tr>
+      </thead>
+      <tbody>
+      {% for t in tiers %}
+        <tr {% if not t.is_active %}class="row-hidden"{% endif %}>
+          <td class="nowrap"><b>#{{ t.id }}</b> {{ t.name }}</td>
+          <td class="nowrap">{{ t.monthly_price }}</td>
+          <td class="nowrap">{{ t.seat_limit }}</td>
+          <td class="nowrap">{{ t.occupied }}</td>
+          <td class="nowrap">
+            {% if t.is_active %}<span class="dot-ok"></span>вкл{% else %}<span class="dot-off"></span>выкл{% endif %}
+          </td>
+          <td class="nowrap"><a class="btn" href="/tariffs/tier/{{ t.id }}">Изменить</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<h3 class="section-title">Длительности</h3>
+<p class="muted">Сроки подписки, доступные пользователю (1/3/6/12 мес и др.). Цену за каждый
+срок задаёте в ступени; без своей цены срок считается как ставка × значение.</p>
+
+<form method="post" action="/tariffs/durations/add" class="card filter-bar">
+  <input type="number" name="value" min="1" step="1" placeholder="Например 3" class="input" required>
+  <select name="unit" class="input">
+    {% for u, label in units %}<option value="{{ u }}">{{ label }}</option>{% endfor %}
+  </select>
+  <button type="submit" class="btn btn-primary">Добавить длительность</button>
+</form>
+
+<div class="card">
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Длительность</th><th>Статус</th><th></th></tr></thead>
+      <tbody>
+      {% for d in durations %}
+        <tr {% if not d.is_active %}class="row-hidden"{% endif %}>
+          <td class="nowrap">{{ d.label }}</td>
+          <td class="nowrap">
+            {% if d.is_active %}<span class="dot-ok"></span>вкл{% else %}<span class="dot-off"></span>выкл{% endif %}
+          </td>
+          <td class="nowrap">
+            <form method="post" action="/tariffs/durations/{{ d.id }}/toggle" style="display:inline">
+              <button type="submit" class="btn">{{ "Выключить" if d.is_active else "Включить" }}</button>
+            </form>
+            <form method="post" action="/tariffs/durations/{{ d.id }}/delete" style="display:inline"
+                  onsubmit="return confirm('Удалить длительность «{{ d.label }}»? Заданные для неё цены сбросятся.');">
+              <button type="submit" class="btn btn-danger">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

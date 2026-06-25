@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Ступень #{{ tier.id }}{% endblock %}
+{% block heading %}Ступень #{{ tier.id }} — {{ tier.name }}{% endblock %}
+{% block content %}
+
+{% if ok %}<div class="alert alert-ok">Сохранено. Бот применит изменения сразу.</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<p class="muted"><a href="/tariffs">← Все тарифы</a></p>
+
+<form method="post" action="/tariffs/tier/{{ tier.id }}" class="card">
+  <div class="form-grid">
+    <div>
+      <label class="price-label">Название</label>
+      <input type="text" name="name" maxlength="64" value="{{ tier.name }}" class="input w-full" required>
+    </div>
+    <div>
+      <label class="price-label">Ставка ₽ / месяц</label>
+      <input type="text" name="monthly_price" value="{{ tier.monthly_price }}" class="input w-full" required>
+    </div>
+    <div>
+      <label class="price-label">Лимит мест (брекет)</label>
+      <input type="text" name="seat_limit" value="{{ tier.seat_limit }}" placeholder="пусто или 0 — безлимит" class="input w-full">
+    </div>
+    <div class="field-wide">
+      <label class="check">
+        <input type="checkbox" name="is_active"{% if tier.is_active %} checked{% endif %}>
+        Ступень активна
+      </label>
+    </div>
+  </div>
+
+  {% if periods %}
+  <h3 class="section-title">Цены за периоды</h3>
+  <p class="muted">Итоговая цена за весь период. Пусто → авто (ставка × значение).</p>
+  <div class="price-grid">
+    {% for p in periods %}
+    <div class="price-cell">
+      <label class="price-label">{{ p.label }}{% if p.custom %} · своя{% else %} · авто{% endif %}</label>
+      <input type="text" name="{{ p.field }}" value="{{ p.value }}" placeholder="авто: {{ p.auto }} ₽" class="input">
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="form-actions"><button type="submit" class="btn btn-primary">Сохранить</button></div>
+</form>
+
+{% endblock %}
