@@ -17,6 +17,7 @@ from .. import keyboards as kb
 from .. import repo, texts
 from ..logger import logger
 from ..services import app_settings
+from ..services import menu
 
 router = Router()
 
@@ -40,7 +41,7 @@ async def _show(
 @router.callback_query(F.data == kb.NAV_START)
 async def nav_start(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
-    await _show(cb, pool, "start", texts.WELCOME, kb.welcome_kb())
+    await _show(cb, pool, "start", texts.WELCOME, await menu.welcome_kb(pool))
 
 
 @router.callback_query(F.data == kb.NAV_ABOUT)
@@ -56,7 +57,7 @@ async def nav_rules(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(F.data == kb.NAV_MENU)
 async def nav_menu(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
-    await _show(cb, pool, "menu", texts.MAIN_MENU, kb.main_menu_kb())
+    await _show(cb, pool, "menu", texts.MAIN_MENU, await menu.main_menu_kb(pool))
 
 
 @router.callback_query(F.data == kb.NAV_SUPPORT)

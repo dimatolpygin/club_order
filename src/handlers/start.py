@@ -11,6 +11,7 @@ from .. import keyboards as kb
 from .. import repo, texts
 from ..logger import logger
 from ..services import app_settings
+from ..services import menu
 from ..services import referral as ref
 
 router = Router()
@@ -52,7 +53,7 @@ async def cmd_start(
     if code:
         await _try_bind_referral(pool, message, code)
     await repo.set_fsm_state(pool, u.id, "screen:start")
-    await message.answer(texts.WELCOME, reply_markup=kb.welcome_kb())
+    await message.answer(texts.WELCOME, reply_markup=await menu.welcome_kb(pool))
     logger.info(f"🤖 Бот → @{u.username or '—'}: приветствие /start")
 
 
@@ -72,5 +73,5 @@ async def cmd_menu(message: Message, pool: asyncpg.Pool, state: FSMContext) -> N
     u = message.from_user
     await repo.upsert_user(pool, u.id, u.username, u.first_name)
     await repo.set_fsm_state(pool, u.id, "screen:menu")
-    await message.answer(texts.MAIN_MENU, reply_markup=kb.main_menu_kb())
+    await message.answer(texts.MAIN_MENU, reply_markup=await menu.main_menu_kb(pool))
     logger.info(f"🤖 Бот → @{u.username or '—'}: главное меню /menu")

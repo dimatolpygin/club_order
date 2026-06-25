@@ -216,6 +216,14 @@ html, body {
 .badge { display: inline-flex; align-items: center; justify-content: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.2; white-space: nowrap; }
 .badge-blue { background: #eaf0fe; color: var(--blue-ink); }
 .badge-green { background: #e9f7ee; color: #15803d; }
+.badge-danger { background: #fdecec; color: var(--red); }
+/* Инлайн-форма продления в строке таблицы (этап 19). */
+.inline-form { display: inline-flex; align-items: center; gap: 6px; }
+.inline-form .num-sm { width: 64px; }
+/* Раздел «Кнопки меню» (этап 19). */
+.w-full { width: 100%; }
+.form-actions { margin-top: 14px; }
+.switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--ink-soft); }
 .pill {
   display: inline-block; margin: 1px 0; padding: 2px 8px; border-radius: 999px;
   font-size: 11.5px; color: var(--ink-soft); background: #f0f2f5; white-space: nowrap;

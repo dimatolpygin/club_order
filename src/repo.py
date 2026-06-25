@@ -946,6 +946,97 @@ async def cancel_active_subscriptions(pool: asyncpg.Pool, tg_id: int) -> int:
     return len(rows)
 
 
+# ── Подписки для веб-админки (этап 19) ────────────────────────────────────────
+async def list_active_subscriptions(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Активные (не истёкшие) подписки + данные пользователя — для раздела «Подписки».
+
+    Сортировка по ближайшему окончанию (кому продлевать срочнее — выше).
+    """
+    return await pool.fetch(
+        """
+        SELECT s.id, s.tg_id, s.fixed_price, s.unit, s.end_date, s.source,
+               u.username, u.first_name
+        FROM subscriptions s
+        JOIN users u ON u.tg_id = s.tg_id
+        WHERE s.status = 'active' AND s.end_date > now()
+        ORDER BY s.end_date ASC
+        """
+    )
+
+
+async def get_subscription(pool: asyncpg.Pool, sub_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow("SELECT * FROM subscriptions WHERE id = $1", sub_id)
+
+
+async def set_subscription_end_date(
+    pool: asyncpg.Pool, sub_id: int, end_date: datetime
+) -> bool:
+    """Меняет дату окончания активной подписки (ручное продление из веб-админки).
+
+    Обновляем только активную подписку. True — обновлено. Цену (`fixed_price`) не
+    трогаем — продление без перерыва сохраняет зафиксированную ставку.
+    """
+    row = await pool.fetchrow(
+        """
+        UPDATE subscriptions SET end_date = $2, updated_at = now()
+        WHERE id = $1 AND status = 'active'
+        RETURNING id
+        """,
+        sub_id,
+        end_date,
+    )
+    return row is not None
+
+
+async def disable_subscription_via_expiry(pool: asyncpg.Pool, sub_id: int) -> int | None:
+    """Ручное отключение подписки из веб-админки. Возвращает tg_id или None.
+
+    Веб-процесс отдельный от бота и сам кикать из группы не может, поэтому ставим
+    активной подписке `end_date = now()` — фоновая проверка окончаний бота
+    (`run_expiry_check` → `expire_due_subscriptions`) на ближайшем проходе пометит
+    её 'expired', кикнет из группы и уведомит пользователя (как при штатном
+    окончании). `get_active_subscription` начинает возвращать None сразу.
+    """
+    row = await pool.fetchrow(
+        """
+        UPDATE subscriptions SET end_date = now(), updated_at = now()
+        WHERE id = $1 AND status = 'active'
+        RETURNING tg_id
+        """,
+        sub_id,
+    )
+    return row["tg_id"] if row is not None else None
+
+
+# ── Кнопки меню бота (menu_buttons, этап 19) ──────────────────────────────────
+async def get_menu_overrides(pool: asyncpg.Pool) -> dict[str, asyncpg.Record]:
+    """Переопределения кнопок меню из БД: {key: record(label, is_visible)}.
+
+    Дефолтные подписи/состав — в реестре services.menu; здесь только то, что
+    админ изменил. Бот сливает их при рендере меню.
+    """
+    rows = await pool.fetch("SELECT key, label, is_visible FROM menu_buttons")
+    return {r["key"]: r for r in rows}
+
+
+async def upsert_menu_button(
+    pool: asyncpg.Pool, key: str, label: str | None, is_visible: bool
+) -> None:
+    """Сохраняет переопределение кнопки меню (label=None → дефолт из реестра)."""
+    await pool.execute(
+        """
+        INSERT INTO menu_buttons(key, label, is_visible, updated_at)
+        VALUES($1, $2, $3, now())
+        ON CONFLICT (key) DO UPDATE
+            SET label = EXCLUDED.label, is_visible = EXCLUDED.is_visible,
+                updated_at = now()
+        """,
+        key,
+        label,
+        is_visible,
+    )
+
+
 # ── Реферальная программа (referral_links / referrals / bonus_ledger, этап 17) ─
 async def get_or_create_referral_code(pool: asyncpg.Pool, tg_id: int, gen) -> str:
     """Реф-код пользователя (создаёт при первом обращении). gen — генератор кандидата.

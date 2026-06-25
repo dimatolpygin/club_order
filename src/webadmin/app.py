@@ -22,7 +22,9 @@ from ..logger import logger, setup_logging
 from . import auth, repo
 from .deps import NotAuthenticated, current_admin, templates
 from .events import router as events_router
+from .menu_buttons import router as menu_buttons_router
 from .referral import router as referral_router
+from .subscriptions import router as subscriptions_router
 
 _HERE = Path(__file__).resolve().parent
 
@@ -36,6 +38,8 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 app.include_router(events_router)
 app.include_router(referral_router)
+app.include_router(subscriptions_router)
+app.include_router(menu_buttons_router)
 
 
 @app.exception_handler(NotAuthenticated)

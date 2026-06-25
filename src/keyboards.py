@@ -41,17 +41,9 @@ TPROMO = "tpromo"            # tpromo:{event_id}:{ticket_type} — ввести 
 # Оплата бонусами на билете (этап 17).
 TBONUS = "tbonus"            # tbonus:{event_id}:{ticket_type}:{promo_or_0}:{1|0} — тоггл бонусов
 
-def welcome_kb() -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="Вступить в клуб", callback_data=NAV_JOIN))
-    b.row(
-        InlineKeyboardButton(text="Мероприятия", callback_data=NAV_EVENTS),
-        InlineKeyboardButton(text="Мои билеты", callback_data=NAV_MYTICKETS),
-    )
-    b.row(InlineKeyboardButton(text="Что внутри клуба", callback_data=NAV_ABOUT))
-    b.row(InlineKeyboardButton(text="Правила участия", callback_data=NAV_RULES))
-    b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
-    return b.as_markup()
+# Клавиатуры приветствия (welcome_kb) и главного меню (main_menu_kb) переехали в
+# services.menu — они стали DB-управляемыми (переименование/скрытие кнопок из
+# веб-админки, этап 19). Здесь остаются вторичные экраны и константы NAV_*.
 
 
 def about_kb() -> InlineKeyboardMarkup:
@@ -79,27 +71,6 @@ def support_kb(url: str | None) -> InlineKeyboardMarkup:
     if url:
         b.row(InlineKeyboardButton(text="Перейти в поддержку", url=url))
     b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_START))
-    return b.as_markup()
-
-
-def main_menu_kb() -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="Вступить в клуб", callback_data=NAV_JOIN))
-    b.row(
-        InlineKeyboardButton(text="Моя подписка", callback_data=NAV_MYSUB),
-        InlineKeyboardButton(text="Продлить", callback_data=NAV_RENEW),
-    )
-    b.row(InlineKeyboardButton(text="Ввести промокод", callback_data=NAV_PROMO))
-    b.row(
-        InlineKeyboardButton(text="Мероприятия", callback_data=NAV_EVENTS),
-        InlineKeyboardButton(text="Мои билеты", callback_data=NAV_MYTICKETS),
-    )
-    b.row(InlineKeyboardButton(text="Пригласить друга", callback_data=NAV_REFERRAL))
-    b.row(
-        InlineKeyboardButton(text="Что внутри клуба", callback_data=NAV_ABOUT),
-        InlineKeyboardButton(text="Правила клуба", callback_data=NAV_RULES),
-    )
-    b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
     return b.as_markup()
 
 
