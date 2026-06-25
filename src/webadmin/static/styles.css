@@ -250,3 +250,64 @@ html, body {
 .price-label { font-size: 13px; color: var(--ink-soft); }
 
 @media (max-width: 720px) { .form-grid { grid-template-columns: 1fr; } }
+
+/* ── Дашборд: период ────────────────────────────────────────────────────── */
+.period-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-bottom: 10px;
+}
+.segmented { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; box-shadow: var(--shadow); }
+.seg {
+  display: inline-flex; align-items: center; padding: 7px 14px; border-radius: 8px;
+  font-size: 13.5px; font-weight: 600; color: var(--ink-soft); text-decoration: none;
+}
+.seg:hover { color: var(--ink); }
+.seg.is-active { background: var(--blue); color: #fff; }
+.period-custom { display: inline-flex; align-items: center; gap: 7px; margin: 0; }
+.input-date { height: 36px; font-size: 13.5px; padding: 0 10px; }
+.period-dash { color: var(--ink-soft); }
+.seg-active-btn { border-color: var(--blue); color: var(--blue-ink); }
+.period-note { color: var(--ink-soft); font-size: 13px; margin: 0 0 18px; }
+
+/* ── Дашборд: KPI ───────────────────────────────────────────────────────── */
+.kpi-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px; margin-bottom: 22px;
+}
+.kpi {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 16px 18px; border-top: 3px solid var(--line);
+}
+.kpi-accent-blue { border-top-color: var(--blue); }
+.kpi-accent-green { border-top-color: var(--green); }
+.kpi-label { font-size: 12px; text-transform: uppercase; letter-spacing: .4px; color: var(--ink-soft); font-weight: 600; }
+.kpi-value { font-size: 26px; font-weight: 800; margin-top: 6px; line-height: 1.1; }
+.kpi-unit { font-size: 16px; font-weight: 600; color: var(--ink-soft); }
+.kpi-delta { margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--ink-soft); display: flex; align-items: baseline; gap: 8px; }
+.kpi-delta.is-up { color: var(--green); }
+.kpi-delta.is-down { color: var(--red); }
+.kpi-delta-note { font-size: 12px; font-weight: 500; color: var(--ink-soft); margin-top: 6px; }
+
+/* ── Дашборд: график ────────────────────────────────────────────────────── */
+.chart-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.chart-legend { display: flex; gap: 14px; }
+.lg { font-size: 12px; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; }
+.lg::before { content: ""; width: 14px; height: 0; border-top-width: 3px; border-top-style: solid; border-radius: 2px; }
+.lg-cur::before { border-top-color: var(--blue); }
+.lg-prev::before { border-top-color: var(--green); border-top-style: dashed; }
+.chart-svg { display: block; width: 100%; height: auto; }
+.chart-grid { stroke: var(--line); stroke-width: 1; }
+.chart-axis { stroke: #c2c8d0; stroke-width: 1; }
+.chart-ytick, .chart-xtick { fill: var(--ink-soft); font-size: 11px; font-family: inherit; }
+.chart-area { fill: rgba(37, 99, 235, .12); stroke: none; }
+.chart-line { fill: none; stroke: var(--blue); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.chart-line-prev { fill: none; stroke: var(--green); stroke-width: 2; stroke-dasharray: 5 4; stroke-linejoin: round; opacity: .8; }
+
+/* ── Дашборд: направления ───────────────────────────────────────────────── */
+.dir-list { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+.dir-row { display: flex; flex-direction: column; gap: 6px; }
+.dir-top { display: flex; justify-content: space-between; align-items: baseline; }
+.dir-name { font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
+.dir-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.dir-amount { font-size: 14px; font-weight: 700; }
+.dir-bar { height: 9px; background: #f0f2f5; border-radius: 999px; overflow: hidden; }
+.dir-bar-fill { display: block; height: 100%; border-radius: 999px; min-width: 2px; }

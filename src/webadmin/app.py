@@ -24,6 +24,7 @@ from .deps import NotAuthenticated, current_admin, templates
 from .events import router as events_router
 from .menu_buttons import router as menu_buttons_router
 from .referral import router as referral_router
+from .stats import router as stats_router
 from .subscriptions import router as subscriptions_router
 
 _HERE = Path(__file__).resolve().parent
@@ -36,6 +37,7 @@ app.add_middleware(
     max_age=14 * 24 * 3600,  # 2 недели
 )
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
+app.include_router(stats_router)
 app.include_router(events_router)
 app.include_router(referral_router)
 app.include_router(subscriptions_router)
@@ -124,14 +126,6 @@ async def login_submit(
 async def logout(request: Request):
     request.session.pop("admin", None)
     return RedirectResponse("/login", status_code=303)
-
-
-@app.get("/")
-async def dashboard(request: Request):
-    admin = current_admin(request)
-    return templates.TemplateResponse(
-        request, "dashboard.html", {"admin": admin, "active": "dashboard"}
-    )
 
 
 @app.get("/password")

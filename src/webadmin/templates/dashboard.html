@@ -3,50 +3,90 @@
 {% block heading %}Дашборд{% endblock %}
 {% block content %}
 
-<div class="panel">
-  <h2 class="panel-title">Админ-панель запущена</h2>
-  <p class="panel-text">
-    Это рабочий каркас панели управления. Вход, выход и смена пароля уже работают.
-    Разделы ниже подключаются поэтапно — по мере готовности они станут активными в меню слева.
-  </p>
+{# ── Переключатель периода ─────────────────────────────────────────────── #}
+<div class="period-bar">
+  <div class="segmented">
+    {% for key, lbl in period_options.items() %}
+      {% if key != 'custom' %}
+        <a class="seg {% if period == key %}is-active{% endif %}" href="/?period={{ key }}">{{ lbl }}</a>
+      {% endif %}
+    {% endfor %}
+  </div>
+  <form class="period-custom" method="get" action="/">
+    <input type="hidden" name="period" value="custom">
+    <input class="input input-date" type="date" name="from" value="{{ custom_from }}" required>
+    <span class="period-dash">–</span>
+    <input class="input input-date" type="date" name="to" value="{{ custom_to }}" required>
+    <button class="btn btn-light btn-sm {% if period == 'custom' %}seg-active-btn{% endif %}" type="submit">Показать</button>
+  </form>
 </div>
 
-<div class="cards">
-  <div class="card">
-    <div class="card-head">
-      <span class="card-dot dot-blue"></span>
-      <span class="card-name">Мероприятия</span>
-    </div>
-    <p class="card-desc">Создание событий (бани, ретриты), цены по типам билетов, места и расписание.</p>
-    <span class="card-stage">Этап 12</span>
+<p class="period-note">Период: <b>{{ period_label }}</b>{% if has_prev %} · сравнение с предыдущим периодом той же длины{% endif %}</p>
+
+{# ── KPI ───────────────────────────────────────────────────────────────── #}
+<div class="kpi-row">
+  <div class="kpi kpi-accent-blue">
+    <div class="kpi-label">Доход за период</div>
+    <div class="kpi-value">{{ total_text }}</div>
+    {% if has_prev %}
+      <div class="kpi-delta {% if delta.up %}is-up{% elif delta.down %}is-down{% endif %}">
+        {{ delta.pct_text }}
+        <span class="kpi-delta-note">пред.: {{ prev_total_text }}</span>
+      </div>
+    {% endif %}
   </div>
 
-  <div class="card">
-    <div class="card-head">
-      <span class="card-dot dot-green"></span>
-      <span class="card-name">Подписки</span>
-    </div>
-    <p class="card-desc">Список подписчиков со сроками, ручное продление и отключение.</p>
-    <span class="card-stage">Этап 19</span>
+  <div class="kpi">
+    <div class="kpi-label">Активные подписчики</div>
+    <div class="kpi-value">{{ subs }}</div>
+    <div class="kpi-delta-note">сейчас 11:11</div>
   </div>
 
-  <div class="card">
-    <div class="card-head">
-      <span class="card-dot dot-blue"></span>
-      <span class="card-name">Реферальная программа</span>
-    </div>
-    <p class="card-desc">Суммы бонусов, цепочки приглашений, ручное начисление и списание.</p>
-    <span class="card-stage">Этап 17</span>
+  <div class="kpi">
+    <div class="kpi-label">Платежей за период</div>
+    <div class="kpi-value">{{ pay_count }}</div>
+    <div class="kpi-delta-note">средний чек {{ avg_check_text }}</div>
   </div>
 
-  <div class="card">
-    <div class="card-head">
-      <span class="card-dot dot-green"></span>
-      <span class="card-name">Статистика</span>
-    </div>
-    <p class="card-desc">Доход за период со сравнением, по направлениям; графики и показатели.</p>
-    <span class="card-stage">Этап 20</span>
+  <div class="kpi kpi-accent-green">
+    <div class="kpi-label">Рефералка</div>
+    <div class="kpi-value">{{ ref.qualified }}<span class="kpi-unit"> / {{ ref.invited }}</span></div>
+    <div class="kpi-delta-note">состоялось / приглашений · бонусов {{ ref_bonus_text }}</div>
   </div>
+</div>
+
+{# ── График дохода ─────────────────────────────────────────────────────── #}
+<div class="panel">
+  <div class="chart-head">
+    <h2 class="panel-title">Доход по дням</h2>
+    {% if has_prev %}
+    <div class="chart-legend">
+      <span class="lg lg-cur">текущий период</span>
+      <span class="lg lg-prev">предыдущий</span>
+    </div>
+    {% endif %}
+  </div>
+  {{ chart_svg | safe }}
+</div>
+
+{# ── Доход по направлениям ─────────────────────────────────────────────── #}
+<div class="panel">
+  <h2 class="panel-title">Доход по направлениям</h2>
+  {% if directions %}
+  <div class="dir-list">
+    {% for d in directions %}
+    <div class="dir-row">
+      <div class="dir-top">
+        <span class="dir-name"><span class="dir-dot" style="background: {{ d.color }}"></span>{{ d.label }}</span>
+        <span class="dir-amount">{{ d.amount_text }}</span>
+      </div>
+      <div class="dir-bar"><span class="dir-bar-fill" style="width: {{ d.pct }}%; background: {{ d.color }}"></span></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="panel-text">За выбранный период дохода нет.</p>
+  {% endif %}
 </div>
 
 {% endblock %}
