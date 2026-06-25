@@ -311,17 +311,46 @@ async def get_duration(pool: asyncpg.Pool, duration_id: int) -> asyncpg.Record |
 async def upsert_duration(
     pool: asyncpg.Pool, value: int, unit: str = "month", is_active: bool = True
 ) -> None:
-    """Добавляет/включает длительность (значение + единица). months хранит значение."""
+    """Добавляет/включает длительность (значение + единица). months хранит значение.
+
+    Новая длительность встаёт В КОНЕЦ списка (sort_order = max+10) — порядок потом
+    меняется вручную в админке. При реактивации существующей порядок сохраняется.
+    """
     await pool.execute(
         """
         INSERT INTO durations(months, unit, sort_order, is_active)
-        VALUES($1, $2, $1, $3)
+        VALUES($1, $2, COALESCE((SELECT MAX(sort_order) FROM durations), 0) + 10, $3)
         ON CONFLICT (months, unit) DO UPDATE SET is_active = EXCLUDED.is_active
         """,
         value,
         unit,
         is_active,
     )
+
+
+async def move_duration(pool: asyncpg.Pool, duration_id: int, direction: str) -> bool:
+    """Сдвигает длительность вверх/вниз в списке (direction='up'|'down').
+
+    Нормализует sort_order всех строк по текущему порядку и применяет перестановку
+    с соседом — устойчиво к дублям/пропускам в sort_order. Возвращает False, если
+    двигать некуда (край списка) или длительность не найдена.
+    """
+    rows = await pool.fetch("SELECT id FROM durations ORDER BY sort_order, months, id")
+    ids = [r["id"] for r in rows]
+    if duration_id not in ids:
+        return False
+    i = ids.index(duration_id)
+    j = i - 1 if direction == "up" else i + 1
+    if j < 0 or j >= len(ids):
+        return False
+    ids[i], ids[j] = ids[j], ids[i]
+    async with pool.acquire() as con:
+        async with con.transaction():
+            for pos, did in enumerate(ids):
+                await con.execute(
+                    "UPDATE durations SET sort_order = $1 WHERE id = $2", pos * 10, did
+                )
+    return True
 
 
 async def set_duration_active(pool: asyncpg.Pool, duration_id: int, is_active: bool) -> bool:

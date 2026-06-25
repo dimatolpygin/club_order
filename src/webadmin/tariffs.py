@@ -216,6 +216,20 @@ async def duration_toggle(request: Request, dur_id: int):
     return RedirectResponse("/tariffs?ok=Сохранено.", status_code=303)
 
 
+@router.post("/tariffs/durations/{dur_id}/move")
+async def duration_move(request: Request, dur_id: int):
+    current_admin(request)
+    form = await request.form()
+    direction = (form.get("dir") or "").strip()
+    if direction not in ("up", "down"):
+        return RedirectResponse("/tariffs", status_code=303)
+    pool = get_pool()
+    if await repo.move_duration(pool, dur_id, direction):
+        await tariffs_svc.invalidate(get_redis())
+        logger.info("Админка: длительность #{} сдвинута {}", dur_id, direction)
+    return RedirectResponse("/tariffs?ok=Порядок обновлён.", status_code=303)
+
+
 @router.post("/tariffs/durations/{dur_id}/delete")
 async def duration_delete(request: Request, dur_id: int):
     current_admin(request)
