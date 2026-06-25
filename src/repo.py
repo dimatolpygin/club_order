@@ -665,6 +665,25 @@ async def get_ticket(pool: asyncpg.Pool, ticket_id: int) -> asyncpg.Record | Non
     return await pool.fetchrow("SELECT * FROM tickets WHERE id = $1", ticket_id)
 
 
+async def list_active_tickets(pool: asyncpg.Pool, tg_id: int) -> list[asyncpg.Record]:
+    """Активные билеты пользователя (этап 18): оплаченные на будущие события.
+
+    Прошедшие события скрыты (`starts_at > now()`). К каждому билету подтягиваем
+    данные события (название/тип/дата/адрес) для карточки. Сортировка — по дате.
+    """
+    return await pool.fetch(
+        """
+        SELECT t.id, t.event_id, t.ticket_type, t.price, t.status, t.rules_agreed,
+               e.title, e.kind, e.starts_at, e.address
+        FROM tickets t
+        JOIN events e ON e.id = t.event_id
+        WHERE t.tg_id = $1 AND t.status = 'paid' AND e.starts_at > now()
+        ORDER BY e.starts_at
+        """,
+        tg_id,
+    )
+
+
 async def set_ticket_rules_agreed(pool: asyncpg.Pool, ticket_id: int) -> None:
     await pool.execute(
         "UPDATE tickets SET rules_agreed = true WHERE id = $1", ticket_id

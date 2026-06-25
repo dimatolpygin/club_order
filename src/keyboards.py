@@ -19,6 +19,12 @@ NAV_RENEW = "nav:renew"      # Продлить подписку
 NAV_PROMO = "nav:promo"      # Ввести промокод
 NAV_EVENTS = "nav:events"    # Мероприятия (билеты «Фокус.Энергия», этап 13)
 NAV_REFERRAL = "nav:referral"  # Пригласить друга / моя реф-ссылка (этап 17)
+NAV_MYTICKETS = "nav:mytickets"  # Мои билеты (этап 18)
+
+# Раздел «Мои билеты» (этап 18).
+MYT_OPEN = "myt"             # myt:{ticket_id} — карточка билета
+MYT_REFUND = "mytref"        # mytref:{ticket_id} — запрос на возврат (подтверждение)
+MYT_REFUND_OK = "mytrefok"   # mytrefok:{ticket_id} — подтвердить запрос на возврат
 
 # Префиксы callback'ов раздела мероприятий.
 EVT_OPEN = "evt"             # evt:{event_id} — открыть карточку события
@@ -38,7 +44,10 @@ TBONUS = "tbonus"            # tbonus:{event_id}:{ticket_type}:{promo_or_0}:{1|0
 def welcome_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Вступить в клуб", callback_data=NAV_JOIN))
-    b.row(InlineKeyboardButton(text="Мероприятия", callback_data=NAV_EVENTS))
+    b.row(
+        InlineKeyboardButton(text="Мероприятия", callback_data=NAV_EVENTS),
+        InlineKeyboardButton(text="Мои билеты", callback_data=NAV_MYTICKETS),
+    )
     b.row(InlineKeyboardButton(text="Что внутри клуба", callback_data=NAV_ABOUT))
     b.row(InlineKeyboardButton(text="Правила участия", callback_data=NAV_RULES))
     b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
@@ -81,7 +90,10 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="Продлить", callback_data=NAV_RENEW),
     )
     b.row(InlineKeyboardButton(text="Ввести промокод", callback_data=NAV_PROMO))
-    b.row(InlineKeyboardButton(text="Мероприятия", callback_data=NAV_EVENTS))
+    b.row(
+        InlineKeyboardButton(text="Мероприятия", callback_data=NAV_EVENTS),
+        InlineKeyboardButton(text="Мои билеты", callback_data=NAV_MYTICKETS),
+    )
     b.row(InlineKeyboardButton(text="Пригласить друга", callback_data=NAV_REFERRAL))
     b.row(
         InlineKeyboardButton(text="Что внутри клуба", callback_data=NAV_ABOUT),
@@ -323,4 +335,51 @@ def ticket_address_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="К мероприятиям", callback_data=NAV_EVENTS))
     b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
+    return b.as_markup()
+
+
+# ── Мои билеты (этап 18) ──────────────────────────────────────────────────────
+def my_tickets_kb(tickets: list) -> InlineKeyboardMarkup:
+    """Список активных билетов: кнопка на каждый билет (Название · дата) + меню.
+
+    `tickets` — записи из repo.list_active_tickets (поля title/starts_at/id).
+    """
+    b = InlineKeyboardBuilder()
+    for t in tickets:
+        b.row(
+            InlineKeyboardButton(
+                text=f"{t['title']} · {t['starts_at']:%d.%m}",
+                callback_data=f"{MYT_OPEN}:{t['id']}",
+            )
+        )
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
+    return b.as_markup()
+
+
+def ticket_detail_kb(ticket_id: int) -> InlineKeyboardMarkup:
+    """Карточка билета: показать адрес (флоу согласия) · запрос возврата · назад.
+
+    «Показать адрес» переиспользует существующий обработчик согласия с правилами
+    (TAGREE), который и рисует экран с адресом. Кнопки «Перенос» нет (решение заказчика).
+    """
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="Показать адрес", callback_data=f"{TAGREE}:{ticket_id}"
+    ))
+    b.row(InlineKeyboardButton(
+        text="Запросить возврат", callback_data=f"{MYT_REFUND}:{ticket_id}"
+    ))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_MYTICKETS))
+    return b.as_markup()
+
+
+def ticket_refund_confirm_kb(ticket_id: int) -> InlineKeyboardMarkup:
+    """Подтверждение запроса на возврат: отправить менеджеру / назад к билету."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="Да, запросить возврат", callback_data=f"{MYT_REFUND_OK}:{ticket_id}"
+    ))
+    b.row(InlineKeyboardButton(
+        text="Назад", callback_data=f"{MYT_OPEN}:{ticket_id}"
+    ))
     return b.as_markup()
