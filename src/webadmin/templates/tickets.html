@@ -43,6 +43,7 @@
           {{ t.first_name or '—' }}
           {%- if t.username %} <span class="muted">@{{ t.username }}</span>{% endif %}
           <span class="muted">· id {{ t.tg_id }}</span>
+          <div><a class="link-tg" href="tg://user?id={{ t.tg_id }}">Написать в Telegram</a></div>
         </td>
         <td class="nowrap">{{ type_label.get(t.ticket_type, t.ticket_type) }}</td>
         <td class="nowrap">{{ t.price|int }} ₽</td>
@@ -50,6 +51,13 @@
           {% if t.status == 'refunded' %}
             <span class="badge badge-danger">возвращён</span>
             <div class="muted">{{ t.refunded_at.strftime('%d.%m.%Y %H:%M') if t.refunded_at }}{% if t.refunded_by %} · {{ t.refunded_by }}{% endif %}</div>
+            {% if t.refund_notify_failed %}
+              <span class="pill pill-danger">не доставлено — свяжитесь вручную</span>
+            {% elif t.refund_notified_at %}
+              <span class="muted">уведомлён</span>
+            {% else %}
+              <span class="muted">уведомление отправляется…</span>
+            {% endif %}
           {% elif t.refund_requested %}
             <span class="badge badge-green">оплачен</span>
             <span class="pill pill-danger">возврат запрошен</span>

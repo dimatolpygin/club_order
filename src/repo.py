@@ -724,7 +724,8 @@ async def list_sold_tickets(
         """
         SELECT t.id, t.tg_id, t.ticket_type, t.price, t.status,
                t.refund_requested, t.refund_requested_at,
-               t.refunded_at, t.refunded_by, t.created_at,
+               t.refunded_at, t.refunded_by,
+               t.refund_notified_at, t.refund_notify_failed, t.created_at,
                u.username, u.first_name,
                e.id AS event_id, e.title, e.kind, e.starts_at
         FROM tickets t
@@ -784,6 +785,41 @@ async def mark_ticket_refunded(
                 "event_id": row["event_id"],
                 "referral_voided": voided,
             }
+
+
+async def refunds_pending_notify(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Возвращённые билеты, по которым ещё не отправлено уведомление о возврате.
+
+    Исключаем уже уведомлённые (refund_notified_at) и окончательно недоставленные
+    (refund_notify_failed) — последние ждут ручной связи менеджера.
+    """
+    return await pool.fetch(
+        """
+        SELECT t.id, t.tg_id, t.event_id, e.title, e.kind, e.starts_at
+        FROM tickets t
+        JOIN events e ON e.id = t.event_id
+        WHERE t.status = 'refunded'
+          AND t.refunded_at IS NOT NULL
+          AND t.refund_notified_at IS NULL
+          AND t.refund_notify_failed = false
+        ORDER BY t.refunded_at
+        """
+    )
+
+
+async def mark_refund_notified(pool: asyncpg.Pool, ticket_id: int) -> None:
+    """Фиксирует успешную доставку уведомления о возврате."""
+    await pool.execute(
+        "UPDATE tickets SET refund_notified_at = now() WHERE id = $1", ticket_id
+    )
+
+
+async def mark_refund_notify_failed(pool: asyncpg.Pool, ticket_id: int) -> None:
+    """Помечает недоставку уведомления (пользователь заблокировал бота) — менеджер
+    свяжется вручную. Исключает билет из повторных попыток рассылки."""
+    await pool.execute(
+        "UPDATE tickets SET refund_notify_failed = true WHERE id = $1", ticket_id
+    )
 
 
 # ── Уведомления по событиям (event_notifications, этап 20) ────────────────────

@@ -13,8 +13,15 @@
      помечает их билеты на ручной полный возврат (`refund_requested`, как этап 18 —
      обрабатывается менеджером в этапе 21). Один раз на событие (kind='canceled').
 
+  3. **Уведомление о возврате** (этап 21.1) — менеджер отметил фактический возврат
+     билета в веб-админке (`tickets.status='refunded'`). Бот шлёт пользователю
+     «возврат произведён» (`refund_done`). При успехе — `refund_notified_at`; при
+     недоставке (юзер заблокировал бота) — `refund_notify_failed` (менеджер увидит
+     пометку «не доставлено» и свяжется вручную по tg-ссылке).
+
 Защита от дублей — claim в `event_notifications` (PK event_id+kind, ON CONFLICT DO
-NOTHING), как у напоминаний о продлении (этап 6).
+NOTHING) для (1)/(2); для (3) — пометки на самом билете (notified/failed исключают
+повторную отправку).
 """
 from __future__ import annotations
 
@@ -76,8 +83,31 @@ async def _send_cancellations(pool: asyncpg.Pool, bot: Bot) -> None:
         )
 
 
+async def _send_refund_notifications(pool: asyncpg.Pool, bot: Bot) -> None:
+    """Уведомляет о произведённом возврате; фиксирует доставку/недоставку."""
+    tickets = await repo.refunds_pending_notify(pool)
+    for t in tickets:
+        text = texts.refund_done(kind_label(t["kind"]), t["title"], t["starts_at"])
+        try:
+            await bot.send_message(t["tg_id"], text)
+        except Exception as e:  # noqa: BLE001 — юзер заблокировал бота / закрыл ЛС
+            await repo.mark_refund_notify_failed(pool, t["id"])
+            logger.warning(
+                "Уведомление о возврате билета #{} НЕ доставлено (id={}): {} — "
+                "менеджеру нужна ручная связь",
+                t["id"], t["tg_id"], e,
+            )
+            continue
+        await repo.mark_refund_notified(pool, t["id"])
+        logger.info(
+            "🔔 Возврат произведён → id={} (билет #{}, «{}»)",
+            t["tg_id"], t["id"], t["title"],
+        )
+
+
 async def run_event_notifications(pool: asyncpg.Pool, bot: Bot) -> None:
-    """Фоновый проход: напоминания за 1 день + рассылка по отменённым событиям."""
+    """Фоновый проход: напоминания за 1 день + отменённые события + уведомления о возврате."""
     now = datetime.now(timezone.utc)
     await _send_day_before(pool, bot, now)
     await _send_cancellations(pool, bot)
+    await _send_refund_notifications(pool, bot)
