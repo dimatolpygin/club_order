@@ -219,6 +219,19 @@ async def event_delete(request: Request, event_id: int):
     return RedirectResponse("/events", status_code=303)
 
 
+# ── Отмена (этап 20) ─────────────────────────────────────────────────────────
+@router.post("/events/{event_id}/cancel")
+async def event_cancel(request: Request, event_id: int):
+    """Отменяет событие: проставляет canceled_at + скрывает. Рассылку купившим и
+    пометку билетов на возврат выполнит фоновый джоб бота (отдельный процесс)."""
+    current_admin(request)
+    pool = get_pool()
+    done = await events_repo.cancel_event(pool, event_id)
+    if done:
+        logger.info("Админка: отменено мероприятие #{} (рассылку выполнит бот)", event_id)
+    return RedirectResponse("/events", status_code=303)
+
+
 def _render_form(request: Request, f: dict, prices: dict, *, error, is_new: bool, status: int = 200):
     return templates.TemplateResponse(
         request, "event_form.html",

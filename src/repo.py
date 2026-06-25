@@ -710,6 +710,106 @@ async def set_ticket_rules_agreed(pool: asyncpg.Pool, ticket_id: int) -> None:
     )
 
 
+# ── Уведомления по событиям (event_notifications, этап 20) ────────────────────
+async def events_due_day_reminder(
+    pool: asyncpg.Pool, before_ts: datetime
+) -> list[asyncpg.Record]:
+    """События, по которым пора слать напоминание «за 1 день».
+
+    Условия: активно, не отменено, ещё не прошло (starts_at > now), наступает не
+    позже `before_ts` (now + порог), и напоминание 'day_before' ещё не отправлено.
+    """
+    return await pool.fetch(
+        """
+        SELECT e.id, e.kind, e.title, e.starts_at, e.address
+        FROM events e
+        WHERE e.is_active = true AND e.canceled_at IS NULL
+          AND e.starts_at > now() AND e.starts_at <= $1
+          AND NOT EXISTS (
+              SELECT 1 FROM event_notifications n
+              WHERE n.event_id = e.id AND n.kind = 'day_before'
+          )
+        ORDER BY e.starts_at
+        """,
+        before_ts,
+    )
+
+
+async def events_pending_cancellation(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Отменённые события, по которым ещё не разослано уведомление об отмене."""
+    return await pool.fetch(
+        """
+        SELECT e.id, e.kind, e.title, e.starts_at
+        FROM events e
+        WHERE e.canceled_at IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM event_notifications n
+              WHERE n.event_id = e.id AND n.kind = 'canceled'
+          )
+        ORDER BY e.canceled_at
+        """
+    )
+
+
+async def claim_event_notification(
+    pool: asyncpg.Pool, event_id: int, kind: str
+) -> bool:
+    """Атомарно «занимает» рассылку (событие, тип). True — занято нами.
+
+    INSERT ... ON CONFLICT DO NOTHING — защита от повторной рассылки при повторных
+    прогонах планировщика и гонке параллельных проходов (аналог claim_reminder).
+    """
+    row = await pool.fetchrow(
+        """
+        INSERT INTO event_notifications(event_id, kind)
+        VALUES($1, $2)
+        ON CONFLICT (event_id, kind) DO NOTHING
+        RETURNING event_id
+        """,
+        event_id,
+        kind,
+    )
+    return row is not None
+
+
+async def paid_ticket_holders(
+    pool: asyncpg.Pool, event_id: int
+) -> list[asyncpg.Record]:
+    """Купившие билеты на событие (статус 'paid'): по одному на пользователя.
+
+    Один пользователь мог купить несколько билетов — для рассылки нужен один адрес.
+    """
+    return await pool.fetch(
+        """
+        SELECT DISTINCT t.tg_id, u.username, u.first_name
+        FROM tickets t
+        JOIN users u ON u.tg_id = t.tg_id
+        WHERE t.event_id = $1 AND t.status = 'paid'
+        """,
+        event_id,
+    )
+
+
+async def mark_event_tickets_refund(pool: asyncpg.Pool, event_id: int) -> int:
+    """Помечает все оплаченные билеты события на ручной возврат (как этап 18).
+
+    Ставит refund_requested на ещё не помеченных оплаченных билетах — они попадут
+    в раздел возвратов веб-админки (этап 21). Возвращает число помеченных билетов.
+    """
+    val = await pool.fetchval(
+        """
+        WITH upd AS (
+            UPDATE tickets SET refund_requested = true, refund_requested_at = now()
+            WHERE event_id = $1 AND status = 'paid' AND refund_requested = false
+            RETURNING id
+        )
+        SELECT count(*) FROM upd
+        """,
+        event_id,
+    )
+    return int(val or 0)
+
+
 async def activate_ticket_payment(
     pool: asyncpg.Pool, yk_id: str
 ) -> tuple[int | None, bool, str]:

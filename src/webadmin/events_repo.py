@@ -8,7 +8,7 @@ import asyncpg
 _EVENT_COLS = (
     "id, kind, title, starts_at, gender_balance, seats_total, seats_male, "
     "seats_female, show_in_advance, subscriber_discount_percent, address, "
-    "rules_text, is_active, created_at"
+    "rules_text, is_active, canceled_at, created_at"
 )
 
 
@@ -118,3 +118,21 @@ async def set_prices(pool: asyncpg.Pool, event_id: int, prices: dict[str, int | 
 async def delete_event(pool: asyncpg.Pool, event_id: int) -> None:
     # Цены удалятся каскадом (FK ON DELETE CASCADE).
     await pool.execute("DELETE FROM events WHERE id = $1", event_id)
+
+
+async def cancel_event(pool: asyncpg.Pool, event_id: int) -> bool:
+    """Отменяет событие: проставляет canceled_at + скрывает (is_active=false).
+
+    Идемпотентно: отменяет только ещё не отменённое событие. Рассылку купившим и
+    пометку билетов на возврат делает фоновый джоб бота (services.event_notifications)
+    — веб-процесс отдельный от бота. Возвращает True, если отменено этим вызовом.
+    """
+    row = await pool.fetchrow(
+        """
+        UPDATE events SET canceled_at = now(), is_active = false
+        WHERE id = $1 AND canceled_at IS NULL
+        RETURNING id
+        """,
+        event_id,
+    )
+    return row is not None

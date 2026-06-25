@@ -17,7 +17,14 @@ from .db import close_pool, init_pool
 from .handlers import get_main_router
 from .logger import setup_logging
 from .middlewares import LoggingMiddleware
-from .services import app_settings, payments, referral_jobs, reminders, subscriptions
+from .services import (
+    app_settings,
+    event_notifications,
+    payments,
+    referral_jobs,
+    reminders,
+    subscriptions,
+)
 
 
 async def main() -> None:
@@ -87,6 +94,17 @@ async def main() -> None:
         minutes=settings.expiry_check_interval_min,
         args=[pool, bot],
         id="accrue_referral_bonuses",
+        max_instances=1,
+        coalesce=True,
+    )
+    # Уведомления по событиям (этап 20): напоминание за 1 день купившим билеты +
+    # рассылка по отменённым в админке событиям. Частота — как у проверки окончаний.
+    scheduler.add_job(
+        event_notifications.run_event_notifications,
+        "interval",
+        minutes=settings.expiry_check_interval_min,
+        args=[pool, bot],
+        id="event_notifications",
         max_instances=1,
         coalesce=True,
     )

@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     reminder_early_offset: int = 3
     reminder_soon_offset: int = 1
     reminder_last_offset: int = 0
+    # ── Уведомления по событиям (этап 20) ────────────────────────────────────
+    # За сколько часов до мероприятия слать напоминание купившим билеты.
+    # Дефолт 24 (за 1 день). Для теста можно поставить меньше. Частота проверки —
+    # как у проверки окончаний подписок (expiry_check_interval_min).
+    event_reminder_offset_hours: int = 24
     # Чек 54-ФЗ: ВРЕМЕННАЯ заглушка email покупателя.
     # АРХИТЕКТУРА: реальный email берётся из users.email (см. services.receipt),
     # эта заглушка — fallback, пока сбор email не включён. Меняется одной настройкой.

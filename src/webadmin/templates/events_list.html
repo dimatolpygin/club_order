@@ -54,9 +54,19 @@
         </td>
         <td class="nowrap">{{ seats_cell(e) }}</td>
         <td><div class="cell-prices">{{ price_summary(e.id) }}</div></td>
-        <td class="nowrap">{% if e.is_active %}<span class="dot-ok"></span> в боте{% else %}<span class="dot-off"></span> скрыто{% endif %}</td>
+        <td class="nowrap">
+          {% if e.canceled_at %}<span class="badge badge-danger">отменено</span>
+          {% elif e.is_active %}<span class="dot-ok"></span> в боте
+          {% else %}<span class="dot-off"></span> скрыто{% endif %}
+        </td>
         <td class="nowrap actions">
           <a class="btn btn-light btn-sm" href="/events/{{ e.id }}/edit">Изменить</a>
+          {% if not e.canceled_at %}
+          <form method="post" action="/events/{{ e.id }}/cancel" class="inline"
+                onsubmit="return confirm('Отменить мероприятие «{{ e.title }}»? Всем купившим уйдёт уведомление, а билеты будут помечены на возврат. Отменить нельзя будет обратно.');">
+            <button type="submit" class="btn btn-danger btn-sm">Отменить</button>
+          </form>
+          {% endif %}
           <form method="post" action="/events/{{ e.id }}/delete" class="inline"
                 onsubmit="return confirm('Удалить мероприятие «{{ e.title }}»? Действие необратимо.');">
             <button type="submit" class="btn btn-danger btn-sm">Удалить</button>
