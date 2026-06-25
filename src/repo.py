@@ -1359,6 +1359,31 @@ async def upsert_menu_button(
     )
 
 
+# ── Тексты экранов бота (screen_texts, этап 22) ───────────────────────────────
+async def get_screen_overrides(pool: asyncpg.Pool) -> dict[str, str]:
+    """Переопределения текстов экранов из БД: {key: body}.
+
+    Дефолтные тексты — в реестре services.screens; здесь только то, что админ
+    изменил. Пустые переопределения (body=NULL) не возвращаем — бот возьмёт дефолт.
+    """
+    rows = await pool.fetch("SELECT key, body FROM screen_texts WHERE body IS NOT NULL")
+    return {r["key"]: r["body"] for r in rows}
+
+
+async def upsert_screen_text(pool: asyncpg.Pool, key: str, body: str | None) -> None:
+    """Сохраняет переопределение текста экрана (body=None → дефолт из реестра)."""
+    await pool.execute(
+        """
+        INSERT INTO screen_texts(key, body, updated_at)
+        VALUES($1, $2, now())
+        ON CONFLICT (key) DO UPDATE
+            SET body = EXCLUDED.body, updated_at = now()
+        """,
+        key,
+        body,
+    )
+
+
 # ── Реферальная программа (referral_links / referrals / bonus_ledger, этап 17) ─
 async def get_or_create_referral_code(pool: asyncpg.Pool, tg_id: int, gen) -> str:
     """Реф-код пользователя (создаёт при первом обращении). gen — генератор кандидата.

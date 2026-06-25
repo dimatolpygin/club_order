@@ -14,10 +14,11 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 import asyncpg
 
 from .. import keyboards as kb
-from .. import repo, texts
+from .. import repo
 from ..logger import logger
 from ..services import app_settings
 from ..services import menu
+from ..services import screens
 
 router = Router()
 
@@ -41,23 +42,23 @@ async def _show(
 @router.callback_query(F.data == kb.NAV_START)
 async def nav_start(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
-    await _show(cb, pool, "start", texts.WELCOME, await menu.welcome_kb(pool))
+    await _show(cb, pool, "start", await screens.text(pool, "start"), await menu.welcome_kb(pool))
 
 
 @router.callback_query(F.data == kb.NAV_ABOUT)
 async def nav_about(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await _show(cb, pool, "about", texts.ABOUT, kb.about_kb())
+    await _show(cb, pool, "about", await screens.text(pool, "about"), kb.about_kb())
 
 
 @router.callback_query(F.data == kb.NAV_RULES)
 async def nav_rules(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
-    await _show(cb, pool, "rules", texts.RULES, kb.rules_kb())
+    await _show(cb, pool, "rules", await screens.text(pool, "rules"), kb.rules_kb())
 
 
 @router.callback_query(F.data == kb.NAV_MENU)
 async def nav_menu(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
     await state.clear()
-    await _show(cb, pool, "menu", texts.MAIN_MENU, await menu.main_menu_kb(pool))
+    await _show(cb, pool, "menu", await screens.text(pool, "menu"), await menu.main_menu_kb(pool))
 
 
 @router.callback_query(F.data == kb.NAV_SUPPORT)
@@ -65,7 +66,7 @@ async def nav_support(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) 
     await state.clear()
     # Раздел поддержки = кнопка-ссылка на аккаунт поддержки (ссылка из админки).
     url = await app_settings.support_url(pool)
-    text = texts.SUPPORT if url else texts.SUPPORT_NO_LINK
+    text = await screens.text(pool, "support" if url else "support_no_link")
     await _show(cb, pool, "support", text, kb.support_kb(url or None))
 
 

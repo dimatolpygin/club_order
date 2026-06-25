@@ -89,3 +89,21 @@ async def button_list(pool: asyncpg.Pool) -> list[dict]:
     """Список кнопок для формы веб-админки (в порядке реестра)."""
     config = await resolve_config(pool)
     return [{"key": key, **config[key]} for key in BUTTON_DEFS]
+
+
+# Раскладки по имени экрана — для редактора кнопок на странице экрана (этап 22).
+LAYOUTS: dict[str, list[list[str]]] = {
+    "welcome": WELCOME_LAYOUT,
+    "main": MAIN_LAYOUT,
+}
+
+
+def layout_keys(name: str) -> list[str]:
+    """Плоский список ключей кнопок раскладки в порядке показа."""
+    return [k for row in LAYOUTS.get(name, []) for k in row]
+
+
+async def buttons_for_layout(pool: asyncpg.Pool, name: str) -> list[dict]:
+    """Кнопки конкретного экрана (для редактора кнопок на странице экрана, этап 22)."""
+    config = await resolve_config(pool)
+    return [{"key": key, **config[key]} for key in layout_keys(name)]

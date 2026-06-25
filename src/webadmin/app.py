@@ -24,6 +24,7 @@ from .deps import NotAuthenticated, current_admin, templates
 from .events import router as events_router
 from .menu_buttons import router as menu_buttons_router
 from .referral import router as referral_router
+from .screens import router as screens_router
 from .stats import router as stats_router
 from .subscriptions import router as subscriptions_router
 from .tickets import router as tickets_router
@@ -43,6 +44,9 @@ app.include_router(events_router)
 app.include_router(tickets_router)
 app.include_router(referral_router)
 app.include_router(subscriptions_router)
+app.include_router(screens_router)
+# Старый раздел «Кнопки меню» (этап 19) свёрнут в «Экраны бота» (этап 22): пункт меню
+# убран из навигации, но роутер оставлен для прямых ссылок/закладок.
 app.include_router(menu_buttons_router)
 
 

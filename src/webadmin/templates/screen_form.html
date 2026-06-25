@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ screen.title }}{% endblock %}
+{% block heading %}Экран: {{ screen.title }}{% endblock %}
+{% block content %}
+
+{% if ok %}<div class="alert alert-ok">Сохранено. Бот применит изменения сразу.</div>{% endif %}
+
+<p class="muted">
+  <a href="/screens">← Все экраны</a> · {{ screen.hint }}
+  Поддерживается HTML-форматирование Telegram: <code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>,
+  <code>&lt;u&gt;</code>, <code>&lt;s&gt;</code>, <code>&lt;a href="…"&gt;</code>, <code>&lt;code&gt;</code>.
+</p>
+
+<form method="post" action="/screens/{{ screen.key }}" class="card">
+  <div class="screen-grid">
+    <div>
+      <label class="price-label">Текст экрана</label>
+      <textarea name="body" class="input textarea w-full" rows="16"
+                placeholder="Текст экрана">{{ screen.body }}</textarea>
+      <p class="muted">Пусто или текст по умолчанию → вернётся стандартный текст.</p>
+    </div>
+    <div>
+      <label class="price-label">Предпросмотр (как увидит пользователь)</label>
+      <div class="tg-preview">{{ screen.body | safe }}</div>
+      {% if screen.custom %}
+        <p class="muted">Сейчас задан свой текст. Очистите поле и сохраните, чтобы вернуть стандартный.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if buttons %}
+  <h3 class="section-title">Кнопки этого экрана</h3>
+  <p class="muted">Подпись и видимость кнопок. Действует и на приветствие, и на главное меню
+    (кнопка с тем же действием — одна подпись везде). Пустая подпись вернёт стандартную.</p>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Кнопка (по умолчанию)</th><th>Подпись</th><th>Показывать</th></tr>
+      </thead>
+      <tbody>
+      {% for btn in buttons %}
+        <tr>
+          <td class="nowrap">
+            {{ btn.default_label }}
+            {% if btn.custom %}<span class="badge badge-blue">изменена</span>{% endif %}
+          </td>
+          <td>
+            <input type="text" name="label_{{ btn.key }}" maxlength="64"
+                   value="{{ btn.label }}" placeholder="{{ btn.default_label }}" class="w-full">
+          </td>
+          <td>
+            <label class="switch">
+              <input type="checkbox" name="visible_{{ btn.key }}"{% if btn.is_visible %} checked{% endif %}>
+              <span>видна</span>
+            </label>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="form-actions"><button type="submit" class="btn btn-primary">Сохранить</button></div>
+</form>
+
+{% endblock %}
