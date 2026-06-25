@@ -674,6 +674,7 @@ async def list_active_tickets(pool: asyncpg.Pool, tg_id: int) -> list[asyncpg.Re
     return await pool.fetch(
         """
         SELECT t.id, t.event_id, t.ticket_type, t.price, t.status, t.rules_agreed,
+               t.refund_requested,
                e.title, e.kind, e.starts_at, e.address
         FROM tickets t
         JOIN events e ON e.id = t.event_id
@@ -682,6 +683,25 @@ async def list_active_tickets(pool: asyncpg.Pool, tg_id: int) -> list[asyncpg.Re
         """,
         tg_id,
     )
+
+
+async def request_ticket_refund(pool: asyncpg.Pool, ticket_id: int, tg_id: int) -> bool:
+    """Ставит билету пометку «возврат запрошен» (этап 18). Идемпотентно.
+
+    Статус билета НЕ меняем — возврат ручной, место не освобождаем до факта
+    возврата. Обновляем только свой оплаченный билет, у которого запрос ещё не стоял.
+    Возвращает True, если флаг проставлен этим вызовом (False — уже стоял/не подошёл).
+    """
+    row = await pool.fetchrow(
+        """
+        UPDATE tickets SET refund_requested = true, refund_requested_at = now()
+        WHERE id = $1 AND tg_id = $2 AND status = 'paid' AND refund_requested = false
+        RETURNING id
+        """,
+        ticket_id,
+        tg_id,
+    )
+    return row is not None
 
 
 async def set_ticket_rules_agreed(pool: asyncpg.Pool, ticket_id: int) -> None:

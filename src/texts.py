@@ -566,18 +566,36 @@ def my_tickets_list(count: int) -> str:
     )
 
 
-def ticket_detail(title: str, kind_label: str, ticket_label: str, starts_at, price: str) -> str:
-    """Карточка одного билета в разделе «Мои билеты»."""
-    return (
+def ticket_detail(
+    title: str, kind_label: str, ticket_label: str, starts_at, price: str,
+    rules_text: str = "", address: str = "", refund_requested: bool = False,
+) -> str:
+    """Карточка одного билета в разделе «Мои билеты» — всё на одном экране.
+
+    Билет уже оплачен, поэтому адрес и правила показываем сразу (без отдельного
+    шага согласия — он нужен только при первичной выдаче билета).
+    """
+    head = (
         "<b>БИЛЕТ</b>\n\n"
         f"Событие: <b>{title}</b>\n"
         f"Направление: {kind_label}\n"
         f"Тип билета: {ticket_label}\n"
         f"Когда: {starts_at:%d.%m.%Y} в {starts_at:%H:%M}\n"
         f"Стоимость: <b>{price} ₽</b>\n\n"
-        "Адрес покажу после согласия с правилами. Возврат — только вручную через "
-        "менеджера (кнопка ниже)."
     )
+    rules = (
+        f"<b>Правила посещения:</b>\n{rules_text}\n\n"
+        if rules_text and rules_text.strip()
+        else ""
+    )
+    addr_body = address if address and address.strip() else "уточняется — напиши в поддержку"
+    address_block = f"<b>Адрес:</b>\n{addr_body}\n\n"
+    tail = (
+        "<b>Статус: возврат запрошен.</b> Менеджер свяжется с тобой для возврата."
+        if refund_requested
+        else "Возврат — только вручную через менеджера (кнопка ниже)."
+    )
+    return head + rules + address_block + tail
 
 
 def ticket_refund_confirm(title: str, ticket_label: str, starts_at) -> str:
@@ -611,11 +629,15 @@ def ticket_refund_admin_notice(
     title: str, ticket_label: str, starts_at, price: str, ticket_id: int,
 ) -> str:
     """Уведомление админам/менеджеру о запросе на возврат билета (этап 18)."""
-    uname = f"@{username}" if username else "—"
-    name = first_name or "—"
+    name = first_name or "пользователь"
+    uname = f"@{username}" if username else "без username"
+    # Кликабельная ссылка на профиль — чтобы менеджер мог открыть диалог даже
+    # когда у пользователя нет @username (по @username не написать).
+    name_link = f'<a href="tg://user?id={user_id}">{name}</a>'
     return (
         "<b>ЗАПРОС НА ВОЗВРАТ БИЛЕТА</b>\n\n"
-        f"От: {uname} ({name}), id <code>{user_id}</code>\n\n"
+        f"От: {name_link} ({uname})\n"
+        f"ID: <code>{user_id}</code> — нажми на имя выше, чтобы открыть диалог.\n\n"
         f"Билет #{ticket_id}\n"
         f"Событие: <b>{title}</b>\n"
         f"Тип билета: {ticket_label}\n"

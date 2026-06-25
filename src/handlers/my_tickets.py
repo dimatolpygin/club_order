@@ -91,14 +91,18 @@ async def open_ticket(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         await cb.answer("Событие не найдено.", show_alert=True)
         return
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:myticket:{ticket_id}")
+    refund_requested = ticket["refund_requested"]
     text = texts.ticket_detail(
         event["title"], ev.kind_label(event["kind"]),
         ev.ticket_label(ticket["ticket_type"]), event["starts_at"],
         fmt_price(ticket["price"]),
+        rules_text=event["rules_text"], address=event["address"],
+        refund_requested=refund_requested,
     )
-    await _edit(cb, text, kb.ticket_detail_kb(ticket_id))
+    await _edit(cb, text, kb.ticket_detail_kb(ticket_id, refund_requested))
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: карточка билета #{ticket_id}"
+        f"{' (возврат запрошен)' if refund_requested else ''}"
     )
 
 
@@ -108,6 +112,9 @@ async def refund_confirm(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     ticket_id = int(cb.data.split(":", 1)[1])
     ticket = await _owned_ticket(cb, pool, ticket_id)
     if ticket is None:
+        return
+    if ticket["refund_requested"]:
+        await cb.answer("Запрос на возврат уже отправлен — менеджер свяжется.", show_alert=True)
         return
     event = await repo.get_event(pool, ticket["event_id"])
     if event is None:
@@ -133,6 +140,15 @@ async def refund_send(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
     event = await repo.get_event(pool, ticket["event_id"])
     if event is None:
         await cb.answer("Событие не найдено.", show_alert=True)
+        return
+
+    # Ставим пометку «возврат запрошен» (статус билета не меняем — место занято).
+    # Идемпотентно: если запрос уже стоял, повторно админов не дёргаем.
+    newly = await repo.request_ticket_refund(pool, ticket_id, cb.from_user.id)
+    if not newly:
+        await cb.answer("Запрос на возврат уже отправлен ранее.", show_alert=True)
+        await repo.set_fsm_state(pool, cb.from_user.id, f"screen:myticket:refund:sent:{ticket_id}")
+        await _edit(cb, texts.TICKET_REFUND_SENT, kb.to_menu_kb())
         return
 
     notice = texts.ticket_refund_admin_notice(

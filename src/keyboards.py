@@ -346,9 +346,11 @@ def my_tickets_kb(tickets: list) -> InlineKeyboardMarkup:
     """
     b = InlineKeyboardBuilder()
     for t in tickets:
+        # У билета с запрошенным возвратом — метка прямо в подписи кнопки.
+        suffix = " — возврат запрошен" if t["refund_requested"] else ""
         b.row(
             InlineKeyboardButton(
-                text=f"{t['title']} · {t['starts_at']:%d.%m}",
+                text=f"{t['title']} · {t['starts_at']:%d.%m}{suffix}",
                 callback_data=f"{MYT_OPEN}:{t['id']}",
             )
         )
@@ -356,19 +358,17 @@ def my_tickets_kb(tickets: list) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def ticket_detail_kb(ticket_id: int) -> InlineKeyboardMarkup:
-    """Карточка билета: показать адрес (флоу согласия) · запрос возврата · назад.
+def ticket_detail_kb(ticket_id: int, refund_requested: bool = False) -> InlineKeyboardMarkup:
+    """Карточка билета: запрос возврата · назад. Адрес/правила уже на экране.
 
-    «Показать адрес» переиспользует существующий обработчик согласия с правилами
-    (TAGREE), который и рисует экран с адресом. Кнопки «Перенос» нет (решение заказчика).
+    Если возврат уже запрошен — кнопку запроса убираем (нельзя слать повторно).
+    Кнопки «Перенос» нет (решение заказчика).
     """
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(
-        text="Показать адрес", callback_data=f"{TAGREE}:{ticket_id}"
-    ))
-    b.row(InlineKeyboardButton(
-        text="Запросить возврат", callback_data=f"{MYT_REFUND}:{ticket_id}"
-    ))
+    if not refund_requested:
+        b.row(InlineKeyboardButton(
+            text="Запросить возврат", callback_data=f"{MYT_REFUND}:{ticket_id}"
+        ))
     b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_MYTICKETS))
     return b.as_markup()
 
