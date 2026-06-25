@@ -28,6 +28,38 @@ TICKET_TYPE_LABELS = {
 }
 KIND_LABELS = {"banya": "Энерго Баня", "retreat": "Ретрит"}
 
+# Flash-сообщения для схемы Post/Redirect/Get (текст по коду из query ?flash=).
+# Значение: (kind, шаблон). {rid} подставляется из ?rid=.
+_FLASH = {
+    "msg_sent": ("ok", "Сообщение поставлено в очередь — бот доставит его покупателю в "
+                       "течение минуты. Если доставить не выйдет (юзер заблокировал бота), "
+                       "статус станет «не доставлено»."),
+    "msg_empty": ("error", "Введите текст сообщения."),
+    "not_found": ("error", "Билет #{rid} не найден."),
+    "refunded": ("ok", "Билет #{rid} отмечен возвращённым. Место освобождено, билет убран "
+                       "из «Моих билетов» у пользователя."),
+    "refunded_void": ("ok", "Билет #{rid} отмечен возвращённым. Место освобождено, билет "
+                            "убран из «Моих билетов». Реф-связь аннулирована (бонус не "
+                            "начислится)."),
+    "refund_err": ("error", "Билет #{rid} не найден или уже возвращён."),
+}
+
+
+def _redirect(event_id: int | None, flash: str | None = None,
+              thread: int | None = None, rid: int | None = None):
+    """Редирект на GET /tickets (PRG): обновление страницы не пересылает POST."""
+    params = []
+    if event_id:
+        params.append(f"event_id={event_id}")
+    if thread:
+        params.append(f"thread={thread}")
+    if flash:
+        params.append(f"flash={flash}")
+    if rid:
+        params.append(f"rid={rid}")
+    url = "/tickets" + ("?" + "&".join(params) if params else "")
+    return RedirectResponse(url, status_code=303)
+
 
 async def _render(request: Request, *, event_id: int | None, open_thread: int | None = None,
                   error: str | None = None, ok: str | None = None, status: int = 200):
@@ -63,7 +95,16 @@ async def tickets_page(request: Request):
     event_id = int(raw) if raw and raw.strip().isdigit() else None
     raw_t = request.query_params.get("thread")
     open_thread = int(raw_t) if raw_t and raw_t.strip().isdigit() else None
-    return await _render(request, event_id=event_id, open_thread=open_thread)
+    # Flash-сообщение после PRG-редиректа.
+    ok = error = None
+    flash = request.query_params.get("flash")
+    if flash in _FLASH:
+        kind, tmpl = _FLASH[flash]
+        rid = request.query_params.get("rid", "")
+        msg = tmpl.format(rid=rid)
+        ok, error = (msg, None) if kind == "ok" else (None, msg)
+    return await _render(request, event_id=event_id, open_thread=open_thread,
+                         ok=ok, error=error)
 
 
 @router.post("/tickets/{ticket_id}/message")
@@ -77,21 +118,15 @@ async def ticket_message(
     pool = get_pool()
     ticket = await repo.get_ticket(pool, ticket_id)
     if ticket is None:
-        return await _render(request, event_id=eid, error=f"Билет #{ticket_id} не найден.",
-                             status=400)
+        return _redirect(eid, "not_found", rid=ticket_id)
     if not body:
-        return await _render(request, event_id=eid, open_thread=ticket_id,
-                             error="Введите текст сообщения.", status=400)
+        return _redirect(eid, "msg_empty", thread=ticket_id)
     await repo.queue_manager_message(pool, ticket["tg_id"], ticket_id, admin["login"], body)
     logger.info(
         "Админка: сообщение покупателю id={} поставлено в очередь ({})",
         ticket["tg_id"], admin["login"],
     )
-    return await _render(
-        request, event_id=eid, open_thread=ticket_id,
-        ok="Сообщение поставлено в очередь — бот доставит его покупателю в течение минуты. "
-           "Если доставить не выйдет (юзер заблокировал бота), статус станет «не доставлено».",
-    )
+    return _redirect(eid, "msg_sent", thread=ticket_id)
 
 
 @router.post("/tickets/{ticket_id}/refund")
@@ -101,18 +136,11 @@ async def ticket_refund(request: Request, ticket_id: int, event_id: str = Form("
     pool = get_pool()
     res = await repo.mark_ticket_refunded(pool, ticket_id, admin["login"])
     if res is None:
-        return await _render(
-            request, event_id=eid,
-            error=f"Билет #{ticket_id} не найден или уже возвращён.", status=400,
-        )
-    note = " Реф-связь аннулирована (бонус не начислится)." if res["referral_voided"] else ""
+        return _redirect(eid, "refund_err", rid=ticket_id)
     logger.info(
         "Админка: возврат билета #{} отмечен ({}) для id={}{}",
         ticket_id, admin["login"], res["tg_id"],
         " + void реф-связи" if res["referral_voided"] else "",
     )
-    return await _render(
-        request, event_id=eid,
-        ok=f"Билет #{ticket_id} отмечен возвращённым. Место освобождено, билет убран "
-           f"из «Моих билетов» у пользователя.{note}",
-    )
+    flash = "refunded_void" if res["referral_voided"] else "refunded"
+    return _redirect(eid, flash, rid=ticket_id)
