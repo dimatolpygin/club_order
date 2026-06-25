@@ -2,7 +2,8 @@
 from aiogram import Router
 
 from . import (
-    admin, events, join, my_tickets, navigation, payment, promo, referral, start, tariffs
+    admin, events, join, manager_bridge, my_tickets, navigation, payment, promo,
+    referral, start, tariffs
 )
 
 
@@ -19,4 +20,7 @@ def get_main_router() -> Router:
     router.include_router(referral.router)
     router.include_router(join.router)
     router.include_router(navigation.router)
+    # Мост «покупатель → админы» — ПОСЛЕДНИМ: ловит свободный текст вне сценариев
+    # только при открытой переписке (этап 21.1).
+    router.include_router(manager_bridge.router)
     return router

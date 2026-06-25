@@ -20,6 +20,45 @@
   <noscript><button type="submit" class="btn btn-light btn-sm">Показать</button></noscript>
 </form>
 
+{# ── Переписка с покупателем (раскрыта по кнопке «Написать») ─────────────── #}
+{% if open_thread %}
+  {% set ot = (tickets | selectattr('id', 'equalto', open_thread) | list | first) %}
+  {% if ot %}
+  <div class="panel thread-panel">
+    <div class="thread-head">
+      <h2 class="panel-title">Переписка · {{ ot.first_name or '—' }}
+        {%- if ot.username %} @{{ ot.username }}{% endif %} <span class="muted">id {{ ot.tg_id }}</span></h2>
+      <a class="btn btn-light btn-sm" href="/tickets?event_id={{ selected_event or '' }}">Закрыть</a>
+    </div>
+    <div class="thread">
+      {% for m in thread %}
+        <div class="msg msg-{{ m.direction }}">
+          <div class="msg-text">{{ m.text }}</div>
+          <div class="msg-meta">
+            {% if m.direction == 'out' %}менеджер {{ m.admin_login }}
+              · {% if m.status == 'sent' %}доставлено{% elif m.status == 'failed' %}<span class="pill pill-danger">не доставлено</span>{% else %}отправляется…{% endif %}
+            {% else %}покупатель{% endif %}
+            · {{ m.created_at.strftime('%d.%m.%Y %H:%M') }}
+          </div>
+        </div>
+      {% else %}
+        <p class="muted">Переписки ещё нет. Напишите первое сообщение — бот доставит его покупателю.</p>
+      {% endfor %}
+    </div>
+    <form method="post" action="/tickets/{{ ot.id }}/message" class="thread-compose">
+      <input type="hidden" name="event_id" value="{{ selected_event or '' }}">
+      <textarea class="input textarea w-full" name="text" rows="3" required
+                placeholder="Сообщение покупателю (доставит бот)…"></textarea>
+      <button type="submit" class="btn btn-primary btn-sm">Отправить через бота</button>
+    </form>
+    {% if not ot.username %}
+    <p class="muted">У покупателя нет @username — прямая связь из Telegram невозможна,
+      пишите только через бота.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+{% endif %}
+
 <h2 class="section-title">Проданные билеты ({{ tickets|length }})</h2>
 
 {% if tickets %}
@@ -43,7 +82,9 @@
           {{ t.first_name or '—' }}
           {%- if t.username %} <span class="muted">@{{ t.username }}</span>{% endif %}
           <span class="muted">· id {{ t.tg_id }}</span>
-          <div><a class="link-tg" href="tg://user?id={{ t.tg_id }}">Написать в Telegram</a></div>
+          <div>
+            {% if t.username %}<a class="link-tg" href="https://t.me/{{ t.username }}" target="_blank" rel="noopener">t.me/{{ t.username }}</a>{% else %}<span class="muted">без username</span>{% endif %}
+          </div>
         </td>
         <td class="nowrap">{{ type_label.get(t.ticket_type, t.ticket_type) }}</td>
         <td class="nowrap">{{ t.price|int }} ₽</td>
@@ -65,9 +106,10 @@
             <span class="badge badge-green">оплачен</span>
           {% endif %}
         </td>
-        <td class="nowrap">
+        <td class="nowrap actions">
+          <a class="btn btn-sm btn-light" href="/tickets?event_id={{ selected_event or '' }}&thread={{ t.id }}">Написать</a>
           {% if t.status == 'paid' %}
-          <form method="post" action="/tickets/{{ t.id }}/refund"
+          <form method="post" action="/tickets/{{ t.id }}/refund" class="inline"
                 onsubmit="return confirm('Отметить билет #{{ t.id }} ({{ t.first_name or t.tg_id }}) как возвращённый? Подтверждайте только после того, как вернули деньги переводом. Место освободится, билет уйдёт из «Моих билетов».');">
             <input type="hidden" name="event_id" value="{{ selected_event or '' }}">
             <button type="submit" class="btn btn-sm btn-danger">Отметить возврат</button>

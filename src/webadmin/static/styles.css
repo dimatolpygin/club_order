@@ -318,3 +318,15 @@ html, body {
 .filter-bar .input { min-width: 320px; max-width: 100%; }
 .link-tg { font-size: 12.5px; color: var(--blue-ink); text-decoration: none; }
 .link-tg:hover { text-decoration: underline; }
+
+/* ── Билеты: переписка через бота ───────────────────────────────────────── */
+.thread-panel { max-width: 680px; }
+.thread-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.thread-head .panel-title { margin: 0; }
+.thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; max-height: 360px; overflow-y: auto; }
+.msg { padding: 9px 12px; border-radius: 10px; max-width: 80%; }
+.msg-out { background: #eaf0fe; align-self: flex-end; }
+.msg-in { background: #f0f2f5; align-self: flex-start; }
+.msg-text { font-size: 14px; white-space: pre-wrap; }
+.msg-meta { font-size: 11px; color: var(--ink-soft); margin-top: 4px; }
+.thread-compose { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }

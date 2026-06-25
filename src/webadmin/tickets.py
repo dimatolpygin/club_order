@@ -29,17 +29,24 @@ TICKET_TYPE_LABELS = {
 KIND_LABELS = {"banya": "Энерго Баня", "retreat": "Ретрит"}
 
 
-async def _render(request: Request, *, event_id: int | None,
+async def _render(request: Request, *, event_id: int | None, open_thread: int | None = None,
                   error: str | None = None, ok: str | None = None, status: int = 200):
     pool = get_pool()
     tickets = await repo.list_sold_tickets(pool, event_id)
     events = await events_repo.list_events(pool)
+    # Переписка для раскрытой карточки (по tg_id билета).
+    thread = []
+    if open_thread is not None:
+        t = next((x for x in tickets if x["id"] == open_thread), None)
+        if t is not None:
+            thread = await repo.manager_thread(pool, t["tg_id"])
     return templates.TemplateResponse(
         request, "tickets.html",
         {
             "active": "tickets", "admin": request.session.get("admin"),
             "tickets": tickets, "events": events, "selected_event": event_id,
             "type_label": TICKET_TYPE_LABELS, "kind_label": KIND_LABELS,
+            "open_thread": open_thread, "thread": thread,
             "error": error, "ok": ok,
         },
         status_code=status,
@@ -51,7 +58,37 @@ async def tickets_page(request: Request):
     current_admin(request)
     raw = request.query_params.get("event_id")
     event_id = int(raw) if raw and raw.strip().isdigit() else None
-    return await _render(request, event_id=event_id)
+    raw_t = request.query_params.get("thread")
+    open_thread = int(raw_t) if raw_t and raw_t.strip().isdigit() else None
+    return await _render(request, event_id=event_id, open_thread=open_thread)
+
+
+@router.post("/tickets/{ticket_id}/message")
+async def ticket_message(
+    request: Request, ticket_id: int,
+    text: str = Form(...), event_id: str = Form(""),
+):
+    admin = current_admin(request)
+    eid = int(event_id) if event_id and event_id.strip().isdigit() else None
+    body = (text or "").strip()
+    pool = get_pool()
+    ticket = await repo.get_ticket(pool, ticket_id)
+    if ticket is None:
+        return await _render(request, event_id=eid, error=f"Билет #{ticket_id} не найден.",
+                             status=400)
+    if not body:
+        return await _render(request, event_id=eid, open_thread=ticket_id,
+                             error="Введите текст сообщения.", status=400)
+    await repo.queue_manager_message(pool, ticket["tg_id"], ticket_id, admin["login"], body)
+    logger.info(
+        "Админка: сообщение покупателю id={} поставлено в очередь ({})",
+        ticket["tg_id"], admin["login"],
+    )
+    return await _render(
+        request, event_id=eid, open_thread=ticket_id,
+        ok="Сообщение поставлено в очередь — бот доставит его покупателю в течение минуты. "
+           "Если доставить не выйдет (юзер заблокировал бота), статус станет «не доставлено».",
+    )
 
 
 @router.post("/tickets/{ticket_id}/refund")

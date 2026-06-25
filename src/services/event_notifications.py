@@ -105,9 +105,28 @@ async def _send_refund_notifications(pool: asyncpg.Pool, bot: Bot) -> None:
         )
 
 
+async def _send_manager_messages(pool: asyncpg.Pool, bot: Bot) -> None:
+    """Доставляет сообщения менеджеров покупателям (мост этапа 21.1); фиксирует исход."""
+    msgs = await repo.manager_messages_pending(pool)
+    for m in msgs:
+        try:
+            await bot.send_message(m["tg_id"], texts.manager_message_to_user(m["text"]))
+        except Exception as e:  # noqa: BLE001 — юзер заблокировал бота
+            await repo.mark_manager_message_failed(pool, m["id"])
+            logger.warning(
+                "Сообщение менеджера #{} НЕ доставлено (id={}): {}",
+                m["id"], m["tg_id"], e,
+            )
+            continue
+        await repo.mark_manager_message_sent(pool, m["id"])
+        logger.info("✉️ Сообщение менеджера доставлено → id={} (#{}) ", m["tg_id"], m["id"])
+
+
 async def run_event_notifications(pool: asyncpg.Pool, bot: Bot) -> None:
-    """Фоновый проход: напоминания за 1 день + отменённые события + уведомления о возврате."""
+    """Фоновый проход: напоминания за 1 день + отменённые события + уведомления о
+    возврате + доставка сообщений менеджеров покупателям (мост этапа 21.1)."""
     now = datetime.now(timezone.utc)
     await _send_day_before(pool, bot, now)
     await _send_cancellations(pool, bot)
     await _send_refund_notifications(pool, bot)
+    await _send_manager_messages(pool, bot)

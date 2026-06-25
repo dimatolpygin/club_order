@@ -822,6 +822,90 @@ async def mark_refund_notify_failed(pool: asyncpg.Pool, ticket_id: int) -> None:
     )
 
 
+# ── Мост «менеджер ↔ покупатель» (manager_messages, этап 21.1) ────────────────
+async def queue_manager_message(
+    pool: asyncpg.Pool, tg_id: int, ticket_id: int | None, admin_login: str, text: str
+) -> int:
+    """Ставит сообщение менеджера покупателю в очередь доставки (бот доставит)."""
+    return await pool.fetchval(
+        """
+        INSERT INTO manager_messages(tg_id, ticket_id, direction, admin_login, text, status)
+        VALUES($1, $2, 'out', $3, $4, 'pending')
+        RETURNING id
+        """,
+        tg_id, ticket_id, admin_login, text,
+    )
+
+
+async def manager_messages_pending(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """Исходящие сообщения менеджеров, ожидающие доставки ботом."""
+    return await pool.fetch(
+        "SELECT id, tg_id, text FROM manager_messages "
+        "WHERE direction = 'out' AND status = 'pending' ORDER BY created_at"
+    )
+
+
+async def mark_manager_message_sent(pool: asyncpg.Pool, msg_id: int) -> None:
+    await pool.execute(
+        "UPDATE manager_messages SET status = 'sent', delivered_at = now() WHERE id = $1",
+        msg_id,
+    )
+
+
+async def mark_manager_message_failed(pool: asyncpg.Pool, msg_id: int) -> None:
+    await pool.execute(
+        "UPDATE manager_messages SET status = 'failed' WHERE id = $1", msg_id
+    )
+
+
+async def has_manager_conversation(pool: asyncpg.Pool, tg_id: int) -> bool:
+    """Писал ли кто-то из менеджеров этому покупателю за последние 14 дней.
+
+    Ограничивает пересылку входящих: бот форвардит свободный текст админам только от
+    тех, с кем переписка реально открыта (менеджер недавно писал), а не от всех юзеров.
+    """
+    val = await pool.fetchval(
+        """
+        SELECT 1 FROM manager_messages
+        WHERE tg_id = $1 AND direction = 'out'
+          AND created_at > now() - interval '14 days'
+        LIMIT 1
+        """,
+        tg_id,
+    )
+    return val is not None
+
+
+async def log_inbound_manager_message(
+    pool: asyncpg.Pool, tg_id: int, text: str
+) -> None:
+    """Сохраняет ответ покупателя в историю переписки (direction='in')."""
+    await pool.execute(
+        "INSERT INTO manager_messages(tg_id, direction, text, status) "
+        "VALUES($1, 'in', $2, 'received')",
+        tg_id, text,
+    )
+
+
+async def manager_thread(pool: asyncpg.Pool, tg_id: int) -> list[asyncpg.Record]:
+    """История переписки с покупателем (для карточки билета), свежие снизу."""
+    return await pool.fetch(
+        "SELECT direction, admin_login, text, status, created_at "
+        "FROM manager_messages WHERE tg_id = $1 ORDER BY created_at",
+        tg_id,
+    )
+
+
+async def user_ticket_titles(pool: asyncpg.Pool, tg_id: int) -> list[str]:
+    """Названия событий, на которые у пользователя есть билеты — контекст для админов."""
+    rows = await pool.fetch(
+        "SELECT DISTINCT e.title FROM tickets t JOIN events e ON e.id = t.event_id "
+        "WHERE t.tg_id = $1 ORDER BY e.title",
+        tg_id,
+    )
+    return [r["title"] for r in rows]
+
+
 # ── Уведомления по событиям (event_notifications, этап 20) ────────────────────
 async def events_due_day_reminder(
     pool: asyncpg.Pool, before_ts: datetime
