@@ -241,6 +241,8 @@ html, body {
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .form-grid .field-wide { grid-column: 1 / -1; }
 .textarea { height: auto; padding: 10px 13px; resize: vertical; font-family: inherit; line-height: 1.5; }
+/* Файловый input: авто-высота с равными отступами, чтобы нативная кнопка не липла к верху. */
+input[type="file"].input { height: auto; padding: 9px 12px; line-height: 1.4; }
 .check { display: flex; align-items: center; gap: 9px; font-size: 14px; cursor: pointer; }
 .check input { width: 17px; height: 17px; }
 .form-buttons { display: flex; gap: 10px; }
