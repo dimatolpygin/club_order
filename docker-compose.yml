@@ -41,6 +41,25 @@ services:
       redis:
         condition: service_started
 
+  # Веб-админка (цикл 2). Слушает только на localhost:8011 — наружу проксирует
+  # системный Nginx (admin.agat-key.ru, https). Миграции применяет сервис bot;
+  # админка ждёт появления таблицы admin_users. Логин/секрет — из .env (ADMIN_WEB_*).
+  admin:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
+      REDIS_URL: redis://redis:6379/0
+    command: ["uvicorn", "src.webadmin.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8011:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
 volumes:
   pgdata:
   redisdata:

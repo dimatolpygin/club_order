@@ -54,8 +54,18 @@ prompt  "S3_ACCESS_KEY" S3_ACCESS_KEY
 promptp "S3_SECRET_KEY" S3_SECRET_KEY
 prompt  "S3_PUBLIC_BASE_URL (обычно = S3_ENDPOINT)" S3_PUBLIC_BASE_URL
 
+echo ""
+echo "Веб-админка (admin.agat-key.ru). Логин по умолчанию — admin."
+prompt  "ADMIN_WEB_LOGIN [admin]" ADMIN_WEB_LOGIN
+ADMIN_WEB_LOGIN=${ADMIN_WEB_LOGIN:-admin}
+promptp "ADMIN_WEB_PASSWORD (Enter — сгенерировать)" ADMIN_WEB_PASSWORD
+
 # Пароль для встроенного Postgres генерируется автоматически.
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
+# Секрет подписи cookie-сессии админки — всегда случайный.
+ADMIN_WEB_SECRET=$(openssl rand -hex 32)
+# Если пароль админки не задан — генерируем и покажем в конце.
+ADMIN_WEB_PASSWORD=${ADMIN_WEB_PASSWORD:-$(openssl rand -base64 12 | tr -d '/+=' | head -c 16)}
 
 echo ""
 info "Начинаю установку..."
@@ -94,6 +104,15 @@ fi
 if [[ -f .env ]] && grep -q '^POSTGRES_PASSWORD=' .env; then
   POSTGRES_PASSWORD=$(grep '^POSTGRES_PASSWORD=' .env | head -1 | cut -d= -f2-)
   warn "Использую существующий POSTGRES_PASSWORD из .env"
+fi
+# Сохраняем секрет/пароль админки из существующего .env (чтобы не разлогинить и
+# не пересоздавать первого админа).
+if [[ -f .env ]] && grep -q '^ADMIN_WEB_SECRET=' .env; then
+  ADMIN_WEB_SECRET=$(grep '^ADMIN_WEB_SECRET=' .env | head -1 | cut -d= -f2-)
+  warn "Использую существующий ADMIN_WEB_SECRET из .env"
+fi
+if [[ -f .env ]] && grep -q '^ADMIN_WEB_PASSWORD=' .env; then
+  ADMIN_WEB_PASSWORD=$(grep '^ADMIN_WEB_PASSWORD=' .env | head -1 | cut -d= -f2-)
 fi
 
 info "Создаю .env (боевые интервалы)..."
@@ -135,6 +154,11 @@ S3_ACCESS_KEY=${S3_ACCESS_KEY}
 S3_SECRET_KEY=${S3_SECRET_KEY}
 S3_PUBLIC_BASE_URL=${S3_PUBLIC_BASE_URL}
 
+# Веб-админка (цикл 2)
+ADMIN_WEB_SECRET=${ADMIN_WEB_SECRET}
+ADMIN_WEB_LOGIN=${ADMIN_WEB_LOGIN}
+ADMIN_WEB_PASSWORD=${ADMIN_WEB_PASSWORD}
+
 # Прочее
 LOG_LEVEL=INFO
 ENVEOF
@@ -152,6 +176,15 @@ echo "  Каталог:   ${INSTALL_DIR}"
 echo "  Логи:      docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f bot"
 echo "  Рестарт:   docker compose -f ${INSTALL_DIR}/docker-compose.yml restart"
 echo "  Стоп:      docker compose -f ${INSTALL_DIR}/docker-compose.yml down"
+echo ""
+echo "  Веб-админка: http://127.0.0.1:8011 (наружу — через Nginx на admin.agat-key.ru)"
+echo "    Логин:  ${ADMIN_WEB_LOGIN}"
+echo "    Пароль: ${ADMIN_WEB_PASSWORD}"
+echo ""
+echo "  Nginx + https (один раз):"
+echo "    cp deploy/nginx/admin.agat-key.ru.conf /etc/nginx/sites-available/admin.agat-key.ru"
+echo "    ln -sf /etc/nginx/sites-available/admin.agat-key.ru /etc/nginx/sites-enabled/"
+echo "    nginx -t && systemctl reload nginx && certbot --nginx -d admin.agat-key.ru"
 echo ""
 warn "Не забудьте сделать бота администратором группы ${CLUB_CHAT_ID} (право одобрять заявки и банить)!"
 echo "=========================================================="
