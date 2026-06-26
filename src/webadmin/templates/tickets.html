@@ -24,14 +24,18 @@
       <option value="{{ val }}"{% if status_f == val %} selected{% endif %}>{{ lbl }}</option>
     {% endfor %}
   </select>
+  <label class="field-label" for="from">Куплен с:</label>
+  <input class="input" type="date" id="from" name="from" value="{{ date_from }}">
+  <label class="field-label" for="to">по:</label>
+  <input class="input" type="date" id="to" name="to" value="{{ date_to }}">
   <button type="submit" class="btn btn-light btn-sm">Найти</button>
-  {% if search or status_f %}
+  {% if search or status_f or date_from or date_to %}
     <a class="btn btn-light btn-sm" href="/tickets?event_id={{ selected_event or '' }}">Сбросить</a>
   {% endif %}
-  <a class="btn btn-sm btn-light" href="/tickets/export.csv?event_id={{ selected_event or '' }}&q={{ search|urlencode }}">Список на вход (CSV)</a>
+  <a class="btn btn-sm btn-light" href="/tickets/export.csv?event_id={{ selected_event or '' }}&q={{ search|urlencode }}&from={{ date_from }}&to={{ date_to }}">Список на вход (CSV)</a>
 </form>
 <p class="muted">Найдено: <b>{{ total }}</b>{% if total > per_page %} · страница {{ page }} из {{ pages }}{% endif %}.
-  «Список на вход (CSV)» — оплаченные по выбранному событию, отсортированы по имени.</p>
+  «Список на вход (CSV)» — оплаченные по текущим фильтрам, отсортированы по имени.</p>
 
 {# ── Переписка с покупателем (раскрыта по кнопке «Написать») ─────────────── #}
 {% if open_thread %}
@@ -135,7 +139,7 @@
   </table>
 </div>
 {% if pages > 1 %}
-  {% set qs = 'event_id=' ~ (selected_event or '') ~ '&q=' ~ (search|urlencode) ~ '&status=' ~ status_f %}
+  {% set qs = 'event_id=' ~ (selected_event or '') ~ '&q=' ~ (search|urlencode) ~ '&status=' ~ status_f ~ '&from=' ~ date_from ~ '&to=' ~ date_to %}
   <div class="pager" style="display:flex;gap:12px;align-items:center;margin:12px 0">
     {% if page > 1 %}<a class="btn btn-sm btn-light" href="/tickets?{{ qs }}&page={{ page - 1 }}">← Назад</a>{% endif %}
     <span class="muted">Страница {{ page }} из {{ pages }}</span>
@@ -146,7 +150,7 @@
 возврата. После отметки место освобождается, билет исчезает из «Моих билетов» у пользователя,
 а реф-связь (если возврат до начисления бонуса) аннулируется.</p>
 {% else %}
-<div class="empty">{% if search or status_f or selected_event %}Под текущие фильтры билетов не найдено.{% else %}Проданных билетов пока нет.{% endif %}</div>
+<div class="empty">{% if search or status_f or selected_event or date_from or date_to %}Под текущие фильтры билетов не найдено.{% else %}Проданных билетов пока нет.{% endif %}</div>
 {% endif %}
 
 {% endblock %}

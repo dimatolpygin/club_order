@@ -51,6 +51,24 @@ def main() -> None:
     check("пустой поиск: без ILIKE", "ILIKE" not in where, True)
     check("пустой поиск: без параметров", params, [])
 
+    # Фильтр по дате покупки (диапазон, включительно).
+    import datetime as _dt
+    d1, d2 = _dt.date(2026, 6, 23), _dt.date(2026, 6, 25)
+    where, params = repo._sold_tickets_filters(None, None, None, d1, d2)
+    check("дата от: >= $1", "t.created_at::date >= $1" in where, True)
+    check("дата до: <= $2", "t.created_at::date <= $2" in where, True)
+    check("дата: параметры по порядку", params, [d1, d2])
+
+    # Только «дата до» — один параметр.
+    where, params = repo._sold_tickets_filters(None, None, None, None, d2)
+    check("только дата до: один параметр", params, [d2])
+    check("только дата до: без >=", ">=" not in where, True)
+
+    # Комбинация событие + дата + поиск — сквозная нумерация параметров.
+    where, params = repo._sold_tickets_filters(7, "Gats", None, d1, None)
+    check("комбо событие+дата+поиск: параметры", params, [7, d1, "%Gats%"])
+    check("комбо: поиск получил $3", "ILIKE $3" in where, True)
+
     print("\nВсе проверки пройдены.")
 
 

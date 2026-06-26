@@ -742,13 +742,14 @@ async def set_ticket_rules_agreed(pool: asyncpg.Pool, ticket_id: int) -> None:
 
 # ── Отметка фактического возврата билета (этап 21) ────────────────────────────
 def _sold_tickets_filters(
-    event_id: int | None, search: str | None, status: str | None
+    event_id: int | None, search: str | None, status: str | None,
+    date_from=None, date_to=None,
 ) -> tuple[str, list]:
     """Строит WHERE-условие и параметры для списка/счётчика проданных билетов (этап 32).
 
     Поиск — по имени / @username / Telegram ID (частичное, регистронезависимо).
     status: 'paid' (оплачен, без запроса возврата) · 'refund_requested' · 'refunded' ·
-    иначе все ('paid'+'refunded').
+    иначе все ('paid'+'refunded'). date_from/date_to — диапазон ДАТЫ ПОКУПКИ (включительно).
     """
     clauses = ["t.status IN ('paid', 'refunded')"]
     params: list = []
@@ -761,6 +762,12 @@ def _sold_tickets_filters(
         clauses.append("t.status = 'paid' AND t.refund_requested = true")
     elif status == "refunded":
         clauses.append("t.status = 'refunded'")
+    if date_from is not None:
+        params.append(date_from)
+        clauses.append(f"t.created_at::date >= ${len(params)}")
+    if date_to is not None:
+        params.append(date_to)
+        clauses.append(f"t.created_at::date <= ${len(params)}")
     s = (search or "").strip()
     if s:
         params.append(f"%{s}%")
@@ -775,14 +782,15 @@ def _sold_tickets_filters(
 async def list_sold_tickets(
     pool: asyncpg.Pool, event_id: int | None = None, *,
     search: str | None = None, status: str | None = None,
+    date_from=None, date_to=None,
     limit: int | None = None, offset: int = 0,
 ) -> list[asyncpg.Record]:
     """Проданные билеты для веб-админки: оплаченные и уже возвращённые (этап 32).
 
-    Фильтры: событие · поиск по покупателю · статус. Пагинация: limit/offset.
-    Сортировка: сначала запрошенные на возврат (требуют действия), затем свежие.
+    Фильтры: событие · поиск по покупателю · статус · диапазон даты покупки.
+    Пагинация: limit/offset. Сортировка: сначала запрошенные на возврат, затем свежие.
     """
-    where, params = _sold_tickets_filters(event_id, search, status)
+    where, params = _sold_tickets_filters(event_id, search, status, date_from, date_to)
     tail = ""
     if limit is not None:
         params.append(limit)
@@ -811,9 +819,10 @@ async def list_sold_tickets(
 async def count_sold_tickets(
     pool: asyncpg.Pool, event_id: int | None = None, *,
     search: str | None = None, status: str | None = None,
+    date_from=None, date_to=None,
 ) -> int:
     """Число проданных билетов под текущие фильтры (для пагинации, этап 32)."""
-    where, params = _sold_tickets_filters(event_id, search, status)
+    where, params = _sold_tickets_filters(event_id, search, status, date_from, date_to)
     return await pool.fetchval(
         f"""
         SELECT COUNT(*)
@@ -826,18 +835,26 @@ async def count_sold_tickets(
 
 
 async def list_checkin_tickets(
-    pool: asyncpg.Pool, event_id: int | None = None, search: str | None = None
+    pool: asyncpg.Pool, event_id: int | None = None, search: str | None = None,
+    date_from=None, date_to=None,
 ) -> list[asyncpg.Record]:
     """Оплаченные билеты для печатного списка на вход (CSV, этап 32).
 
-    Только 'paid' (возвращённые не приходят), по событию + опц. поиску. Сортировка
-    по имени — удобно сверять людей на входе.
+    Только 'paid' (возвращённые не приходят), по событию + опц. поиску + диапазону даты
+    покупки. К билету — событие (название, дата) и Telegram ID. Сортировка по имени —
+    удобно сверять людей на входе.
     """
     clauses = ["t.status = 'paid'"]
     params: list = []
     if event_id is not None:
         params.append(event_id)
         clauses.append(f"t.event_id = ${len(params)}")
+    if date_from is not None:
+        params.append(date_from)
+        clauses.append(f"t.created_at::date >= ${len(params)}")
+    if date_to is not None:
+        params.append(date_to)
+        clauses.append(f"t.created_at::date <= ${len(params)}")
     s = (search or "").strip()
     if s:
         params.append(f"%{s}%")
@@ -849,8 +866,10 @@ async def list_checkin_tickets(
     where = " AND ".join(clauses)
     return await pool.fetch(
         f"""
-        SELECT t.tg_id, t.ticket_type, u.username, u.first_name
+        SELECT t.tg_id, t.ticket_type, u.username, u.first_name,
+               e.title, e.kind, e.starts_at
         FROM tickets t
+        JOIN events e ON e.id = t.event_id
         LEFT JOIN users u ON u.tg_id = t.tg_id
         WHERE {where}
         ORDER BY lower(coalesce(u.first_name, '')), lower(coalesce(u.username, ''))

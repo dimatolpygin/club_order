@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import io
+from datetime import date
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
@@ -40,6 +41,14 @@ STATUS_LABELS = {
     "refunded": "Возвращён",
 }
 PER_PAGE = 50
+
+
+def _parse_date(raw: str | None) -> date | None:
+    """Парсит дату из <input type=date> (YYYY-MM-DD); мусор → None."""
+    try:
+        return date.fromisoformat((raw or "").strip())
+    except ValueError:
+        return None
 
 # Flash-сообщения для схемы Post/Redirect/Get (текст по коду из query ?flash=).
 # Значение: (kind, шаблон). {rid} подставляется из ?rid=.
@@ -75,16 +84,22 @@ def _redirect(event_id: int | None, flash: str | None = None,
 
 
 async def _render(request: Request, *, event_id: int | None, search: str = "",
-                  status_f: str = "", page: int = 1, open_thread: int | None = None,
+                  status_f: str = "", date_from: date | None = None,
+                  date_to: date | None = None, page: int = 1,
+                  open_thread: int | None = None,
                   error: str | None = None, ok: str | None = None, status: int = 200):
     pool = get_pool()
     search = (search or "").strip()
     status_f = status_f if status_f in STATUS_LABELS else ""
-    total = await repo.count_sold_tickets(pool, event_id, search=search, status=status_f)
+    total = await repo.count_sold_tickets(
+        pool, event_id, search=search, status=status_f,
+        date_from=date_from, date_to=date_to,
+    )
     pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
     page = min(max(1, page), pages)
     tickets = await repo.list_sold_tickets(
         pool, event_id, search=search, status=status_f,
+        date_from=date_from, date_to=date_to,
         limit=PER_PAGE, offset=(page - 1) * PER_PAGE,
     )
     events = await events_repo.list_events(pool)
@@ -103,6 +118,8 @@ async def _render(request: Request, *, event_id: int | None, search: str = "",
             "tickets": tickets, "events": events, "selected_event": event_id,
             "type_label": TICKET_TYPE_LABELS, "kind_label": KIND_LABELS,
             "status_labels": STATUS_LABELS, "search": search, "status_f": status_f,
+            "date_from": date_from.isoformat() if date_from else "",
+            "date_to": date_to.isoformat() if date_to else "",
             "page": page, "pages": pages, "total": total, "per_page": PER_PAGE,
             "open_thread": open_thread, "thread": thread, "unread": unread,
             "total_unread": sum(unread.values()),
@@ -121,6 +138,8 @@ async def tickets_page(request: Request):
     open_thread = int(raw_t) if raw_t and raw_t.strip().isdigit() else None
     search = request.query_params.get("q", "")
     status_f = request.query_params.get("status", "")
+    date_from = _parse_date(request.query_params.get("from"))
+    date_to = _parse_date(request.query_params.get("to"))
     raw_p = request.query_params.get("page", "1")
     page = int(raw_p) if raw_p and raw_p.strip().isdigit() else 1
     # Flash-сообщение после PRG-редиректа.
@@ -132,33 +151,39 @@ async def tickets_page(request: Request):
         msg = tmpl.format(rid=rid)
         ok, error = (msg, None) if kind == "ok" else (None, msg)
     return await _render(request, event_id=event_id, search=search, status_f=status_f,
+                         date_from=date_from, date_to=date_to,
                          page=page, open_thread=open_thread, ok=ok, error=error)
 
 
 @router.get("/tickets/export.csv")
 async def tickets_export(request: Request):
-    """Печатный список на вход (CSV): оплаченные по событию/поиску, минимум полей.
+    """Печатный список на вход (CSV): оплаченные по текущим фильтрам.
 
-    Колонки: № · Имя · Контакт (@username или id) · Тип билета · Гостей · Отметка
-    (пустая — для галочки на входе). UTF-8 с BOM — кириллица читается в Excel.
+    Колонки: № · Событие · Дата события · Имя · @username · Telegram ID · Тип билета ·
+    Гостей · Отметка (пустая — для галочки на входе). UTF-8 с BOM — кириллица в Excel.
     """
     current_admin(request)
     pool = get_pool()
     raw = request.query_params.get("event_id")
     event_id = int(raw) if raw and raw.strip().isdigit() else None
     search = request.query_params.get("q", "").strip()
-    rows = await repo.list_checkin_tickets(pool, event_id, search)
+    date_from = _parse_date(request.query_params.get("from"))
+    date_to = _parse_date(request.query_params.get("to"))
+    rows = await repo.list_checkin_tickets(pool, event_id, search, date_from, date_to)
 
     buf = io.StringIO()
     buf.write("﻿")  # BOM для Excel
     w = csv.writer(buf, delimiter=";")
-    w.writerow(["№", "Имя", "Контакт", "Тип билета", "Гостей", "Отметка"])
+    w.writerow(["№", "Событие", "Дата события", "Имя", "@username", "Telegram ID",
+                "Тип билета", "Гостей", "Отметка"])
     for n, r in enumerate(rows, start=1):
         name = (r["first_name"] or "").strip() or "—"
-        contact = f"@{r['username']}" if r["username"] else f"id:{r['tg_id']}"
+        username = f"@{r['username']}" if r["username"] else "—"
+        event_name = f"{KIND_LABELS.get(r['kind'], r['kind'])} · {r['title']}"
+        event_date = r["starts_at"].strftime("%d.%m.%Y %H:%M") if r["starts_at"] else "—"
         guests = 2 if r["ticket_type"] in PAIR_TYPES else 1
-        w.writerow([n, name, contact, TICKET_TYPE_LABELS.get(r["ticket_type"], r["ticket_type"]),
-                    guests, ""])
+        w.writerow([n, event_name, event_date, name, username, r["tg_id"],
+                    TICKET_TYPE_LABELS.get(r["ticket_type"], r["ticket_type"]), guests, ""])
 
     fname = f"checkin_event_{event_id}.csv" if event_id else "checkin_all.csv"
     return Response(
