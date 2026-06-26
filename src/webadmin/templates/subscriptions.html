@@ -7,25 +7,26 @@
 {% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
 
 <h2 class="section-title">Участник</h2>
-<div class="card filter-bar">
+<div class="card">
   <form method="get" action="/subscriptions/find" class="inline-form">
-    <input type="text" name="tg_id" placeholder="Telegram ID участника" class="input" required>
+    <span class="field-label">Найти по ID:</span>
+    <input type="text" name="tg_id" placeholder="Telegram ID" class="input" style="min-width:220px" required>
     <button type="submit" class="btn btn-primary">Открыть карточку</button>
   </form>
+  <form method="post" action="/subscriptions/member/add" class="inline-form">
+    <span class="field-label">Выдать вручную:</span>
+    <input type="text" name="tg_id" placeholder="Telegram ID" class="input" style="min-width:160px" required>
+    <input type="number" name="value" min="1" step="1" value="1" class="num-sm" required>
+    <select name="unit">
+      {% for u, lbl in unit_labels.items() %}
+        <option value="{{ u }}"{% if u == 'month' %} selected{% endif %}>{{ lbl }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-primary">Выдать подписку</button>
+  </form>
+  <p class="muted">Ручная выдача создаёт активную подписку по текущей ставке (источник
+  «вручную»); бот пустит участника в группу по заявке на вступление.</p>
 </div>
-<form method="post" action="/subscriptions/member/add" class="card filter-bar">
-  <span class="muted">Добавить вручную:</span>
-  <input type="text" name="tg_id" placeholder="Telegram ID" class="input" required>
-  <input type="number" name="value" min="1" step="1" value="1" class="num-sm" required>
-  <select name="unit" class="input">
-    {% for u, lbl in unit_labels.items() %}
-      <option value="{{ u }}"{% if u == 'month' %} selected{% endif %}>{{ lbl }}</option>
-    {% endfor %}
-  </select>
-  <button type="submit" class="btn">Выдать подписку</button>
-</form>
-<p class="muted">Ручная выдача создаёт активную подписку по текущей ставке (источник
-«вручную»); бот пустит участника в группу по заявке на вступление.</p>
 
 <h2 class="section-title">Активные подписки ({{ subs|length }})</h2>
 
