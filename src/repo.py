@@ -1,6 +1,7 @@
 """Слой доступа к данным. Все таблицы — в схеме club_bot (search_path задан в db.py)."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -1690,3 +1691,73 @@ async def add_bonus_manual(
                 note,
             )
             return await bonus_balance(conn, tg_id)
+
+
+# ── Рассылки (этап 26): очередь задач веб-админки, бот-джоб разбирает ─────────
+async def create_broadcast(
+    pool: asyncpg.Pool,
+    *,
+    audience: str,
+    body: str | None,
+    photos: list[dict],
+    created_by: str | None,
+) -> int:
+    """Кладёт рассылку в очередь со статусом 'pending'. Возвращает id."""
+    row = await pool.fetchrow(
+        """
+        INSERT INTO broadcasts(audience, body, photos, created_by)
+        VALUES($1, $2, $3, $4)
+        RETURNING id
+        """,
+        audience,
+        body,
+        json.dumps(photos or []),
+        created_by,
+    )
+    return row["id"]
+
+
+async def claim_pending_broadcast(pool: asyncpg.Pool) -> asyncpg.Record | None:
+    """Атомарно забирает старейшую ожидающую рассылку (pending → sending).
+
+    FOR UPDATE SKIP LOCKED — параллельные проходы не возьмут одну и ту же задачу.
+    Возвращает запись (photos — JSON-строка, разбирать json.loads) или None.
+    """
+    return await pool.fetchrow(
+        """
+        UPDATE broadcasts SET status = 'sending', started_at = now()
+        WHERE id = (
+            SELECT id FROM broadcasts WHERE status = 'pending'
+            ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *
+        """
+    )
+
+
+async def set_broadcast_total(pool: asyncpg.Pool, broadcast_id: int, total: int) -> None:
+    await pool.execute(
+        "UPDATE broadcasts SET total = $2 WHERE id = $1", broadcast_id, total
+    )
+
+
+async def finish_broadcast(
+    pool: asyncpg.Pool, broadcast_id: int, *, sent: int, blocked: int, failed: int
+) -> None:
+    await pool.execute(
+        """
+        UPDATE broadcasts
+        SET status = 'done', sent = $2, blocked = $3, failed = $4, finished_at = now()
+        WHERE id = $1
+        """,
+        broadcast_id,
+        sent,
+        blocked,
+        failed,
+    )
+
+
+async def list_broadcasts(pool: asyncpg.Pool, limit: int = 50) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        "SELECT * FROM broadcasts ORDER BY id DESC LIMIT $1", limit
+    )

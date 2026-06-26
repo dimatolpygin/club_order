@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Рассылка{% endblock %}
+{% block heading %}Рассылка{% endblock %}
+{% block content %}
+
+{% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<p class="muted">Сообщение уходит выбранному сегменту через бота. Отправка идёт фоном
+(веб-панель и бот — разные процессы): задача встаёт в очередь, бот рассылает её в
+ближайшую минуту. Заблокировавшие бота помечаются автоматически. Поддерживается
+HTML-разметка в тексте.{% if not s3_enabled %} <b>Фото недоступны: S3 не настроен —
+доступна только текстовая рассылка.</b>{% endif %}</p>
+
+<h3 class="section-title">Новая рассылка</h3>
+<form method="post" action="/broadcasts/create" enctype="multipart/form-data" class="card">
+  <div>
+    <label class="price-label">Кому</label>
+    <select name="audience" class="input w-full">
+      {% for a, label in audiences %}<option value="{{ a }}">{{ label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="price-label">Текст (HTML)</label>
+    <textarea name="body" rows="6" class="input w-full" placeholder="Текст сообщения или подпись к фото"></textarea>
+  </div>
+  {% if s3_enabled %}
+  <div>
+    <label class="price-label">Фото (до {{ max_photos }}; одно фото или альбом)</label>
+    <input type="file" name="photos" accept="image/*" multiple class="input w-full">
+  </div>
+  {% endif %}
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary"
+            onclick="this.disabled=true; this.form.submit();">Поставить в очередь</button>
+  </div>
+</form>
+
+<h3 class="section-title">Последние рассылки</h3>
+<div class="card">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>#</th><th>Кому</th><th>Сообщение</th><th>Фото</th><th>Статус</th><th>Итог</th><th>Создана</th></tr>
+      </thead>
+      <tbody>
+      {% if not rows %}
+        <tr><td colspan="7" class="muted">Рассылок ещё не было.</td></tr>
+      {% endif %}
+      {% for r in rows %}
+        <tr>
+          <td class="nowrap"><b>#{{ r.id }}</b></td>
+          <td class="nowrap">{{ r.audience }}</td>
+          <td>{{ r.preview }}</td>
+          <td class="nowrap">{{ r.photos }}</td>
+          <td class="nowrap">{{ r.status }}</td>
+          <td class="nowrap">
+            {% if r.is_done %}
+              отпр. {{ r.sent }} / {{ r.total }}{% if r.blocked %} · заблок. {{ r.blocked }}{% endif %}{% if r.failed %} · ошибок {{ r.failed }}{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td class="nowrap muted">{{ r.created_at }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

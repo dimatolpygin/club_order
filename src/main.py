@@ -19,6 +19,7 @@ from .logger import setup_logging
 from .middlewares import LoggingMiddleware
 from .services import (
     app_settings,
+    broadcasts,
     event_notifications,
     payments,
     referral_jobs,
@@ -105,6 +106,17 @@ async def main() -> None:
         minutes=settings.expiry_check_interval_min,
         args=[pool, bot],
         id="event_notifications",
+        max_instances=1,
+        coalesce=True,
+    )
+    # Очередь рассылок из веб-админки (этап 26): забираем pending и рассылаем.
+    # Частота — как у поллера платежей (быстрый отклик на новую рассылку).
+    scheduler.add_job(
+        broadcasts.run_broadcast_queue,
+        "interval",
+        minutes=settings.payment_poll_interval_min,
+        args=[pool, bot],
+        id="broadcast_queue",
         max_instances=1,
         coalesce=True,
     )
