@@ -315,6 +315,18 @@ input[type="file"].input { height: auto; padding: 9px 12px; line-height: 1.4; }
 .chart-line { fill: none; stroke: var(--blue); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .chart-line-prev { fill: none; stroke: var(--green); stroke-width: 2; stroke-dasharray: 5 4; stroke-linejoin: round; opacity: .8; }
 
+/* ── Дашборд: переключаемые графики + donut ─────────────────────────────── */
+.chart-select { height: 36px; font-size: 13.5px; padding: 0 10px; max-width: 320px; }
+.chart-pane.is-hidden { display: none; }
+.donut-wrap { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; margin-top: 6px; }
+.donut-svg { width: 200px; height: 200px; flex: none; }
+.donut-total { fill: var(--ink); font-size: 30px; font-weight: 700; font-family: inherit; }
+.donut-total-sub { fill: var(--ink-soft); font-size: 12px; font-family: inherit; }
+.donut-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; min-width: 220px; }
+.donut-legend li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.donut-legend-label { flex: 1; }
+.donut-legend-val { font-weight: 700; white-space: nowrap; }
+
 /* ── Дашборд: направления ───────────────────────────────────────────────── */
 .dir-list { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
 .dir-row { display: flex; flex-direction: column; gap: 6px; }

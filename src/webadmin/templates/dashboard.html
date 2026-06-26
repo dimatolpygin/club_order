@@ -69,6 +69,47 @@
   {{ chart_svg | safe }}
 </div>
 
+{# ── Графики (переключаемые, 1 экран) ──────────────────────────────────── #}
+<div class="panel">
+  <div class="chart-head">
+    <h2 class="panel-title">Графики</h2>
+    <select id="chart-select" class="input chart-select">
+      {% for c in charts %}
+        <option value="{{ c.key }}">{{ c.title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% for c in charts %}
+  <div class="chart-pane{% if not loop.first %} is-hidden{% endif %}" data-chart="{{ c.key }}">
+    <div class="donut-wrap">
+      {{ c.svg | safe }}
+      <ul class="donut-legend">
+        {% for l in c.legend %}
+        <li>
+          <span class="dir-dot" style="background: {{ l.color }}"></span>
+          <span class="donut-legend-label">{{ l.label }}</span>
+          <span class="donut-legend-val">{{ l.value }} · {{ "%.0f"|format(l.pct) }}%</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% if c.total == 0 %}<p class="panel-text">Пока нет данных для этого графика.</p>{% endif %}
+  </div>
+  {% endfor %}
+  <script>
+    (function () {
+      var sel = document.getElementById('chart-select');
+      if (!sel) return;
+      sel.addEventListener('change', function () {
+        var panes = document.querySelectorAll('.chart-pane');
+        for (var i = 0; i < panes.length; i++) {
+          panes[i].classList.toggle('is-hidden', panes[i].getAttribute('data-chart') !== sel.value);
+        }
+      });
+    })();
+  </script>
+</div>
+
 {# ── Доход по направлениям ─────────────────────────────────────────────── #}
 <div class="panel">
   <h2 class="panel-title">Доход по направлениям</h2>

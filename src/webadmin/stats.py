@@ -221,6 +221,68 @@ def build_chart_svg(
     return "".join(parts)
 
 
+# ── Donut-график (распределения, текущий срез) ───────────────────────────────
+def build_donut_svg(segments: list[dict]) -> str:
+    """Кольцевой (donut) график из сегментов [{value, color}].
+
+    Рисуем кольцо на одном <circle> на сегмент через stroke-dasharray/offset
+    (без charting-библиотек). total=0 → серое пустое кольцо. В центре — сумма.
+    """
+    size, stroke = 200, 30
+    r = (size - stroke) / 2
+    cx = cy = size / 2
+    import math
+    circ = 2 * math.pi * r
+    total = sum(max(0, s["value"]) for s in segments)
+
+    parts = [
+        f'<svg viewBox="0 0 {size} {size}" class="donut-svg" role="img" '
+        f'preserveAspectRatio="xMidYMid meet">',
+        f'<circle cx="{cx}" cy="{cy}" r="{r:.2f}" fill="none" '
+        f'stroke="#e5e7eb" stroke-width="{stroke}"/>',
+    ]
+    if total > 0:
+        offset = 0.0
+        for s in segments:
+            val = max(0, s["value"])
+            if val == 0:
+                continue
+            seg_len = circ * val / total
+            parts.append(
+                f'<circle cx="{cx}" cy="{cy}" r="{r:.2f}" fill="none" '
+                f'stroke="{s["color"]}" stroke-width="{stroke}" '
+                f'stroke-dasharray="{seg_len:.2f} {circ - seg_len:.2f}" '
+                f'stroke-dashoffset="{-offset:.2f}" '
+                f'transform="rotate(-90 {cx} {cy})"/>'
+            )
+            offset += seg_len
+    parts.append(
+        f'<text x="{cx}" y="{cy - 2}" text-anchor="middle" class="donut-total">{total}</text>'
+        f'<text x="{cx}" y="{cy + 16}" text-anchor="middle" class="donut-total-sub">всего</text>'
+    )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _donut(title: str, key: str, raw_segments: list[dict]) -> dict:
+    """Собирает donut-график для шаблона: SVG + легенда с числами и процентами."""
+    total = sum(max(0, s["value"]) for s in raw_segments)
+    legend = [
+        {
+            "label": s["label"],
+            "color": s["color"],
+            "value": s["value"],
+            "pct": (s["value"] / total * 100) if total else 0,
+        }
+        for s in raw_segments
+    ]
+    return {
+        "title": title, "key": key,
+        "svg": build_donut_svg(raw_segments),
+        "legend": legend, "total": total,
+    }
+
+
 # ── Форматирование ───────────────────────────────────────────────────────────
 def fmt_money(v) -> str:
     """1234567.5 → '1 234 568 ₽' (без копеек, неразрывные пробелы тысяч)."""
@@ -307,6 +369,27 @@ async def dashboard(request: Request):
 
     avg_check = (float(total) / pay_count) if pay_count else 0
 
+    # Графики-распределения (donut, текущий срез — период не применяется).
+    sub_dist = await stats_repo.subscriber_distribution(pool)
+    tkt_dist = await stats_repo.ticket_buyer_distribution(pool)
+    charts = [
+        _donut(
+            "Распределение подписчиков клуба", "subs_dist",
+            [
+                {"label": "С активной подпиской", "value": sub_dist["active"], "color": "#16a34a"},
+                {"label": "Просроченные (бывшие)", "value": sub_dist["former"], "color": "#f59e0b"},
+                {"label": "Без подписки", "value": sub_dist["none"], "color": "#94a3b8"},
+            ],
+        ),
+        _donut(
+            "Билеты: с подпиской на клуб vs гости", "tickets_dist",
+            [
+                {"label": "Покупатели с подпиской", "value": tkt_dist["with_sub"], "color": "#2563eb"},
+                {"label": "Покупатели-гости", "value": tkt_dist["without_sub"], "color": "#9333ea"},
+            ],
+        ),
+    ]
+
     ctx = {
         "active": "dashboard",
         "admin": admin,
@@ -326,5 +409,6 @@ async def dashboard(request: Request):
         "ref_bonus_text": fmt_money(ref["bonus_paid"]),
         "chart_svg": chart_svg,
         "period_options": PERIOD_LABELS,
+        "charts": charts,
     }
     return templates.TemplateResponse(request, "dashboard.html", ctx)

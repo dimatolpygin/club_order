@@ -147,3 +147,58 @@ async def first_payment_at(pool: asyncpg.Pool) -> datetime | None:
     return await pool.fetchval(
         "SELECT min(updated_at) FROM payments WHERE status = 'succeeded'"
     )
+
+
+# ── Распределения (donut, текущий срез) ──────────────────────────────────────
+async def subscriber_distribution(pool: asyncpg.Pool) -> dict[str, int]:
+    """Распределение всех пользователей бота по статусу подписки на клуб (срез сейчас).
+
+    Категория на пользователя (суммы дают всех users):
+      · active — есть активная подписка (status='active' и end_date>now());
+      · former — подписка была, но сейчас активной нет (просроченные/бывшие);
+      · none   — ни одной подписки в истории (запускали бота без подписки).
+    """
+    row = await pool.fetchrow(
+        """
+        WITH sub AS (
+            SELECT tg_id,
+                   bool_or(status = 'active' AND end_date > now()) AS has_active
+            FROM subscriptions
+            GROUP BY tg_id
+        )
+        SELECT
+            count(*) FILTER (WHERE s.has_active) AS active,
+            count(*) FILTER (WHERE s.tg_id IS NOT NULL AND NOT s.has_active) AS former,
+            count(*) FILTER (WHERE s.tg_id IS NULL) AS none
+        FROM users u
+        LEFT JOIN sub s ON s.tg_id = u.tg_id
+        """
+    )
+    return {"active": int(row["active"]), "former": int(row["former"]),
+            "none": int(row["none"])}
+
+
+async def ticket_buyer_distribution(pool: asyncpg.Pool) -> dict[str, int]:
+    """Среди купивших билеты — у скольких есть активная подписка на клуб (срез сейчас).
+
+    Считаем уникальных покупателей оплаченных билетов (status='paid'):
+      · with_sub    — есть активная подписка сейчас;
+      · without_sub — активной подписки нет (гости).
+    """
+    row = await pool.fetchrow(
+        """
+        SELECT
+            count(*) FILTER (WHERE x.has_active) AS with_sub,
+            count(*) FILTER (WHERE NOT x.has_active) AS without_sub
+        FROM (
+            SELECT b.tg_id,
+                   EXISTS (
+                       SELECT 1 FROM subscriptions s
+                       WHERE s.tg_id = b.tg_id
+                         AND s.status = 'active' AND s.end_date > now()
+                   ) AS has_active
+            FROM (SELECT DISTINCT tg_id FROM tickets WHERE status = 'paid') b
+        ) x
+        """
+    )
+    return {"with_sub": int(row["with_sub"]), "without_sub": int(row["without_sub"])}

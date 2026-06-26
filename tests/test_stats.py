@@ -130,6 +130,30 @@ def main() -> None:
     check_true("svg(n=1): валиден без деления на ноль",
                svg3.startswith("<svg") and "nan" not in svg3.lower())
 
+    # ── build_donut_svg / _donut (этап 28) ────────────────────────────────────
+    segs = [
+        {"label": "A", "value": 1, "color": "#16a34a"},
+        {"label": "B", "value": 1, "color": "#f59e0b"},
+        {"label": "C", "value": 2, "color": "#94a3b8"},
+    ]
+    donut = stats.build_donut_svg(segs)
+    check_true("donut: открывается <svg", donut.startswith("<svg"))
+    check_true("donut: закрывается </svg>", donut.endswith("</svg>"))
+    check_true("donut: нет nan/inf", "nan" not in donut.lower() and "inf" not in donut.lower())
+    check("donut: 3 сегмента-окружности", donut.count("stroke-dasharray"), 3)
+    check_true("donut: сумма в центре = 4", "<text" in donut and ">4<" in donut)
+
+    # пустой donut (total=0): без сегментов, только серое кольцо, валидно
+    empty = stats.build_donut_svg([{"label": "X", "value": 0, "color": "#000"}])
+    check("donut(0): сегментов нет", empty.count("stroke-dasharray"), 0)
+    check_true("donut(0): валиден", empty.startswith("<svg") and "nan" not in empty.lower())
+
+    # _donut: проценты и сумма
+    d = stats._donut("Тест", "k", segs)
+    check("_donut: total", d["total"], 4)
+    check("_donut: ключ", d["key"], "k")
+    check("_donut: проценты сегментов", [round(l["pct"]) for l in d["legend"]], [25, 25, 50])
+
     print("\nВсе проверки пройдены.")
 
 
