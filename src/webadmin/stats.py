@@ -221,6 +221,73 @@ def build_chart_svg(
     return "".join(parts)
 
 
+# ── Bar-график (динамика по датам, по периоду) ───────────────────────────────
+def build_bar_svg(labels: list[str], values: list[float], color: str = "#2563eb") -> str:
+    """Столбчатый inline-SVG по корзинам времени. Оси/шкала — как у графика дохода
+    (ровный максимум, 5 горизонтальных линий с подписями, не более ~7 подписей X)."""
+    W, H = 760, 260
+    pad_l, pad_r, pad_t, pad_b = 52, 14, 14, 30
+    plot_w = W - pad_l - pad_r
+    plot_h = H - pad_t - pad_b
+    n = len(values)
+    top = _nice_max(max([*values, 0.0]))
+
+    def y(v: float) -> float:
+        return pad_t + plot_h * (1 - v / top)
+
+    parts: list[str] = [
+        f'<svg viewBox="0 0 {W} {H}" class="chart-svg" role="img" '
+        f'preserveAspectRatio="xMidYMid meet">'
+    ]
+    # Горизонтальная сетка + подписи Y.
+    for k in range(5):
+        v = top * k / 4
+        yy = y(v)
+        parts.append(
+            f'<line x1="{pad_l}" y1="{yy:.1f}" x2="{W - pad_r}" y2="{yy:.1f}" class="chart-grid"/>'
+        )
+        parts.append(
+            f'<text x="{pad_l - 8}" y="{yy + 4:.1f}" class="chart-ytick" '
+            f'text-anchor="end">{_fmt_axis_value(v)}</text>'
+        )
+    # Столбики.
+    if n:
+        slot = plot_w / n
+        bw = max(1.0, min(slot * 0.7, 46))
+        for i, v in enumerate(values):
+            cx = pad_l + slot * (i + 0.5)
+            h = plot_h * (v / top)
+            parts.append(
+                f'<rect x="{cx - bw / 2:.1f}" y="{y(v):.1f}" width="{bw:.1f}" '
+                f'height="{h:.1f}" rx="2" fill="{color}"/>'
+            )
+    # Базовая ось X.
+    parts.append(
+        f'<line x1="{pad_l}" y1="{y(0):.1f}" x2="{W - pad_r}" y2="{y(0):.1f}" class="chart-axis"/>'
+    )
+    # Подписи X: не более ~7.
+    if n:
+        slot = plot_w / n
+        step = max(1, round(n / 7))
+        for i in range(0, n, step):
+            cx = pad_l + slot * (i + 0.5)
+            parts.append(
+                f'<text x="{cx:.1f}" y="{H - 8}" class="chart-xtick" '
+                f'text-anchor="middle">{labels[i]}</text>'
+            )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _bar(title: str, key: str, labels: list[str], values: list[float],
+         color: str, total: int) -> dict:
+    """Собирает bar-график для шаблона."""
+    return {
+        "title": title, "key": key, "kind": "bar",
+        "svg": build_bar_svg(labels, values, color), "total": total,
+    }
+
+
 # ── Donut-график (распределения, текущий срез) ───────────────────────────────
 def build_donut_svg(segments: list[dict]) -> str:
     """Кольцевой (donut) график из сегментов [{value, color}].
@@ -277,7 +344,7 @@ def _donut(title: str, key: str, raw_segments: list[dict]) -> dict:
         for s in raw_segments
     ]
     return {
-        "title": title, "key": key,
+        "title": title, "key": key, "kind": "donut",
         "svg": build_donut_svg(raw_segments),
         "legend": legend, "total": total,
     }
@@ -389,6 +456,24 @@ async def dashboard(request: Request):
             ],
         ),
     ]
+
+    # Графики динамики (bar) — по выбранному периоду и той же гранулярности/оси,
+    # что у графика дохода (axis/gran/chart_labels уже посчитаны выше).
+    reg_buckets = await stats_repo.registrations_buckets(pool, start, end, gran)
+    act_buckets = await stats_repo.activity_buckets(pool, start, end, gran)
+    act_total = await stats_repo.active_users_total(pool, start, end)
+    reg_series = _series(reg_buckets, axis)
+    act_series = _series(act_buckets, axis)
+    charts.append(_bar(
+        "Регистрации в боте по датам", "registrations",
+        chart_labels, reg_series, "#16a34a", int(sum(reg_series)),
+    ))
+    # «Всего» для активности = уникальные за период (gran-независимо), а не сумма
+    # корзин (она зависит от дневной/месячной разбивки).
+    charts.append(_bar(
+        "Активность в боте по датам", "activity",
+        chart_labels, act_series, "#0ea5e9", act_total,
+    ))
 
     ctx = {
         "active": "dashboard",

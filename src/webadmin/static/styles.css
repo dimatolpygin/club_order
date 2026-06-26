@@ -326,6 +326,7 @@ input[type="file"].input { height: auto; padding: 9px 12px; line-height: 1.4; }
 .donut-legend li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 .donut-legend-label { flex: 1; }
 .donut-legend-val { font-weight: 700; white-space: nowrap; }
+.chart-bar-note { margin: 0 0 8px; color: var(--ink-soft); font-size: 13px; }
 
 /* ── Дашборд: направления ───────────────────────────────────────────────── */
 .dir-list { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }

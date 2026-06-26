@@ -202,3 +202,65 @@ async def ticket_buyer_distribution(pool: asyncpg.Pool) -> dict[str, int]:
         """
     )
     return {"with_sub": int(row["with_sub"]), "without_sub": int(row["without_sub"])}
+
+
+# ── Динамика по датам (bar, по периоду) ──────────────────────────────────────
+async def registrations_buckets(
+    pool: asyncpg.Pool, start: datetime, end: datetime, granularity: str
+) -> dict[datetime, int]:
+    """Новые пользователи бота по корзинам времени: {начало_корзины(UTC): count}.
+
+    Источник — `users.created_at`. Пустые корзины здесь отсутствуют; их заполняет
+    нулями слой представления (как у графика дохода).
+    """
+    unit = granularity if granularity in ("day", "week", "month") else "day"
+    rows = await pool.fetch(
+        f"""
+        SELECT date_trunc('{unit}', created_at) AS bucket, count(*) AS cnt
+        FROM users
+        WHERE created_at >= $1 AND created_at < $2
+        GROUP BY bucket
+        ORDER BY bucket
+        """,
+        start, end,
+    )
+    return {r["bucket"]: int(r["cnt"]) for r in rows}
+
+
+async def active_users_total(pool: asyncpg.Pool, start: datetime, end: datetime) -> int:
+    """Уникальных активных пользователей за весь период (gran-независимый итог для bar).
+
+    Сумма по корзинам distinct-per-bucket зависит от гранулярности, поэтому «всего»
+    для активности считаем отдельно как DISTINCT за период.
+    """
+    val = await pool.fetchval(
+        """
+        SELECT count(DISTINCT tg_id) FROM user_events
+        WHERE created_at >= $1 AND created_at < $2
+        """,
+        start, end,
+    )
+    return int(val or 0)
+
+
+async def activity_buckets(
+    pool: asyncpg.Pool, start: datetime, end: datetime, granularity: str
+) -> dict[datetime, int]:
+    """Активность в боте по корзинам: {начало_корзины(UTC): уникальных пользователей}.
+
+    Источник — `user_events` (журнал действий пользователя). Считаем уникальных
+    пользователей за корзину (а не общее число событий) — «сколько людей было активно».
+    """
+    unit = granularity if granularity in ("day", "week", "month") else "day"
+    rows = await pool.fetch(
+        f"""
+        SELECT date_trunc('{unit}', created_at) AS bucket,
+               count(DISTINCT tg_id) AS cnt
+        FROM user_events
+        WHERE created_at >= $1 AND created_at < $2
+        GROUP BY bucket
+        ORDER BY bucket
+        """,
+        start, end,
+    )
+    return {r["bucket"]: int(r["cnt"]) for r in rows}

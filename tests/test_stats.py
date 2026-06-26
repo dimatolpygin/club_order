@@ -154,6 +154,26 @@ def main() -> None:
     check("_donut: ключ", d["key"], "k")
     check("_donut: проценты сегментов", [round(l["pct"]) for l in d["legend"]], [25, 25, 50])
 
+    # ── build_bar_svg / _bar (этап 29) ────────────────────────────────────────
+    bar = stats.build_bar_svg(["01.06", "02.06", "03.06"], [3.0, 0.0, 5.0], "#16a34a")
+    check_true("bar: открывается <svg", bar.startswith("<svg"))
+    check_true("bar: закрывается </svg>", bar.endswith("</svg>"))
+    check_true("bar: нет nan/inf", "nan" not in bar.lower() and "inf" not in bar.lower())
+    check("bar: по столбику на корзину (нулевой — высотой 0)", bar.count("<rect"), 3)
+    check_true("bar: есть оси/сетка", "chart-grid" in bar and "chart-axis" in bar)
+    check_true("bar: подписи осей", "chart-ytick" in bar and "chart-xtick" in bar)
+
+    # пустой/нулевой ряд не делит на ноль
+    bar0 = stats.build_bar_svg(["01.06"], [0.0], "#000")
+    check_true("bar(0): валиден без nan", bar0.startswith("<svg") and "nan" not in bar0.lower())
+    bar_empty = stats.build_bar_svg([], [], "#000")
+    check_true("bar([]): валиден без столбиков", bar_empty.startswith("<svg") and "<rect" not in bar_empty)
+
+    b = stats._bar("Тест", "k", ["01.06", "02.06"], [2.0, 3.0], "#0ea5e9", 5)
+    check("_bar: kind=bar", b["kind"], "bar")
+    check("_bar: total передаётся как есть", b["total"], 5)
+    check_true("_bar: svg валиден", b["svg"].startswith("<svg"))
+
     print("\nВсе проверки пройдены.")
 
 

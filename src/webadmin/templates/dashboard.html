@@ -81,6 +81,7 @@
   </div>
   {% for c in charts %}
   <div class="chart-pane{% if not loop.first %} is-hidden{% endif %}" data-chart="{{ c.key }}">
+    {% if c.kind == 'donut' %}
     <div class="donut-wrap">
       {{ c.svg | safe }}
       <ul class="donut-legend">
@@ -93,6 +94,10 @@
         {% endfor %}
       </ul>
     </div>
+    {% else %}
+    <p class="chart-bar-note">За период <b>{{ period_label }}</b> · всего {{ c.total }}</p>
+    {{ c.svg | safe }}
+    {% endif %}
     {% if c.total == 0 %}<p class="panel-text">Пока нет данных для этого графика.</p>{% endif %}
   </div>
   {% endfor %}
