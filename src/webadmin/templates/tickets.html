@@ -6,7 +6,7 @@
 {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
 {% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
 
-{# ── Фильтр по событию ──────────────────────────────────────────────────── #}
+{# ── Фильтры: событие · поиск по покупателю · статус ─────────────────────── #}
 <form class="filter-bar" method="get" action="/tickets">
   <label class="field-label" for="event_id">Событие:</label>
   <select class="input" id="event_id" name="event_id" onchange="this.form.submit()">
@@ -17,8 +17,21 @@
       </option>
     {% endfor %}
   </select>
-  <noscript><button type="submit" class="btn btn-light btn-sm">Показать</button></noscript>
+  <input class="input" type="search" name="q" value="{{ search }}"
+         placeholder="Имя, @username или ID" style="min-width:220px">
+  <select class="input" name="status" onchange="this.form.submit()">
+    {% for val, lbl in status_labels.items() %}
+      <option value="{{ val }}"{% if status_f == val %} selected{% endif %}>{{ lbl }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-light btn-sm">Найти</button>
+  {% if search or status_f %}
+    <a class="btn btn-light btn-sm" href="/tickets?event_id={{ selected_event or '' }}">Сбросить</a>
+  {% endif %}
+  <a class="btn btn-sm btn-light" href="/tickets/export.csv?event_id={{ selected_event or '' }}&q={{ search|urlencode }}">Список на вход (CSV)</a>
 </form>
+<p class="muted">Найдено: <b>{{ total }}</b>{% if total > per_page %} · страница {{ page }} из {{ pages }}{% endif %}.
+  «Список на вход (CSV)» — оплаченные по выбранному событию, отсортированы по имени.</p>
 
 {# ── Переписка с покупателем (раскрыта по кнопке «Написать») ─────────────── #}
 {% if open_thread %}
@@ -121,11 +134,19 @@
     </tbody>
   </table>
 </div>
+{% if pages > 1 %}
+  {% set qs = 'event_id=' ~ (selected_event or '') ~ '&q=' ~ (search|urlencode) ~ '&status=' ~ status_f %}
+  <div class="pager" style="display:flex;gap:12px;align-items:center;margin:12px 0">
+    {% if page > 1 %}<a class="btn btn-sm btn-light" href="/tickets?{{ qs }}&page={{ page - 1 }}">← Назад</a>{% endif %}
+    <span class="muted">Страница {{ page }} из {{ pages }}</span>
+    {% if page < pages %}<a class="btn btn-sm btn-light" href="/tickets?{{ qs }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
+  </div>
+{% endif %}
 <p class="muted">Деньги возвращает менеджер вручную переводом — кнопка лишь фиксирует факт
 возврата. После отметки место освобождается, билет исчезает из «Моих билетов» у пользователя,
 а реф-связь (если возврат до начисления бонуса) аннулируется.</p>
 {% else %}
-<div class="empty">{% if selected_event %}По выбранному событию билетов нет.{% else %}Проданных билетов пока нет.{% endif %}</div>
+<div class="empty">{% if search or status_f or selected_event %}Под текущие фильтры билетов не найдено.{% else %}Проданных билетов пока нет.{% endif %}</div>
 {% endif %}
 
 {% endblock %}
