@@ -10,6 +10,7 @@ NAV_ABOUT = "nav:about"
 NAV_RULES = "nav:rules"
 NAV_SUPPORT = "nav:support"
 NAV_MENU = "nav:menu"
+NAV_ABOUTMENU = "nav:aboutmenu"  # Подменю «О клубе» (этап 31): что внутри/правила/пригласить
 
 # Разделы тарифов/оплаты/промокодов (на этапе 1 — заглушки, наполнятся позже).
 NAV_JOIN = "nav:join"        # Вступить в клуб → выбор тарифа
@@ -49,7 +50,7 @@ TBONUS = "tbonus"            # tbonus:{event_id}:{ticket_type}:{promo_or_0}:{1|0
 def about_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Выбрать тариф", callback_data=NAV_TARIFF))
-    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_START))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_ABOUTMENU))
     return b.as_markup()
 
 
@@ -57,7 +58,7 @@ def rules_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Вступить в клуб", callback_data=NAV_JOIN))
     b.row(InlineKeyboardButton(text="Моя подписка", callback_data=NAV_MYSUB))
-    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_START))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_ABOUTMENU))
     return b.as_markup()
 
 

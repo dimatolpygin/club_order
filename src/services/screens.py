@@ -39,6 +39,12 @@ SCREEN_DEFS: dict[str, dict] = {
         "menu": "main",
         "hint": "Главное меню бота.",
     },
+    "aboutmenu": {
+        "title": "Подменю «О клубе»",
+        "default": texts.ABOUTMENU,
+        "menu": "aboutmenu",
+        "hint": "Хаб: Что внутри · Правила · Пригласить друга. Подписи кнопок правятся здесь.",
+    },
     "about": {
         "title": "Что внутри клуба",
         "default": texts.ABOUT,

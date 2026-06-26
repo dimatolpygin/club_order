@@ -21,25 +21,37 @@ from .. import repo
 # Реестр: ключ → (дефолтная подпись, callback). Порядок определяет порядок в админке.
 BUTTON_DEFS: dict[str, tuple[str, str]] = {
     "join": ("Вступить в клуб", kb.NAV_JOIN),
+    "renew": ("Продлить подписку", kb.NAV_RENEW),
     "mysub": ("Моя подписка", kb.NAV_MYSUB),
-    "renew": ("Продлить", kb.NAV_RENEW),
     "promo": ("Ввести промокод", kb.NAV_PROMO),
     "events": ("Мероприятия", kb.NAV_EVENTS),
     "mytickets": ("Мои билеты", kb.NAV_MYTICKETS),
+    "aboutmenu": ("О клубе", kb.NAV_ABOUTMENU),
     "referral": ("Пригласить друга", kb.NAV_REFERRAL),
     "about": ("Что внутри клуба", kb.NAV_ABOUT),
     "rules": ("Правила клуба", kb.NAV_RULES),
     "support": ("Поддержка", kb.NAV_SUPPORT),
 }
 
-# Раскладки меню (ряды по 1–2 ключа).
-WELCOME_LAYOUT: list[list[str]] = [
-    ["join"], ["events", "mytickets"], ["about"], ["rules"], ["support"],
+# Контекстные раскладки верхнего уровня (этап 31): показываем только релевантное
+# статусу подписки, главное действие — первым рядом во всю ширину (иерархия позицией,
+# без эмодзи). Инфо/рефералка спрятаны в подменю «О клубе» (aboutmenu). Промокода на
+# верхнем уровне нет — ввод остаётся в флоу оплаты/тарифа.
+LAYOUT_GUEST: list[list[str]] = [
+    ["join"], ["events", "mytickets"], ["aboutmenu", "support"],
 ]
-MAIN_LAYOUT: list[list[str]] = [
-    ["join"], ["mysub", "renew"], ["promo"], ["events", "mytickets"],
-    ["referral"], ["about", "rules"], ["support"],
+LAYOUT_SUB: list[list[str]] = [
+    ["renew"], ["mysub"], ["events", "mytickets"], ["aboutmenu", "support"],
 ]
+# Подменю «О клубе» (открывается по кнопке aboutmenu).
+ABOUTMENU_LAYOUT: list[list[str]] = [
+    ["about"], ["rules"], ["referral"],
+]
+
+
+def _top_layout(subscribed: bool) -> list[list[str]]:
+    """Раскладка верхнего уровня по статусу подписки."""
+    return LAYOUT_SUB if subscribed else LAYOUT_GUEST
 
 
 async def resolve_config(pool: asyncpg.Pool) -> dict[str, dict]:
@@ -75,14 +87,30 @@ def _build(layout: list[list[str]], config: dict[str, dict]) -> InlineKeyboardMa
     return b.as_markup()
 
 
-async def welcome_kb(pool: asyncpg.Pool) -> InlineKeyboardMarkup:
-    """Клавиатура приветствия (/start) с учётом настроек кнопок."""
-    return _build(WELCOME_LAYOUT, await resolve_config(pool))
+async def welcome_kb(pool: asyncpg.Pool, subscribed: bool) -> InlineKeyboardMarkup:
+    """Клавиатура приветствия (/start): контекстна по статусу подписки (этап 31)."""
+    return _build(_top_layout(subscribed), await resolve_config(pool))
 
 
-async def main_menu_kb(pool: asyncpg.Pool) -> InlineKeyboardMarkup:
-    """Клавиатура главного меню (/menu) с учётом настроек кнопок."""
-    return _build(MAIN_LAYOUT, await resolve_config(pool))
+async def main_menu_kb(pool: asyncpg.Pool, subscribed: bool) -> InlineKeyboardMarkup:
+    """Клавиатура главного меню (/menu): контекстна по статусу подписки (этап 31)."""
+    return _build(_top_layout(subscribed), await resolve_config(pool))
+
+
+async def aboutmenu_kb(pool: asyncpg.Pool) -> InlineKeyboardMarkup:
+    """Подменю «О клубе»: инфо-экраны + рефералка + «Назад» в меню (этап 31)."""
+    b = InlineKeyboardBuilder()
+    config = await resolve_config(pool)
+    for row in ABOUTMENU_LAYOUT:
+        visible = [k for k in row if config[k]["is_visible"]]
+        if not visible:
+            continue
+        b.row(*[
+            InlineKeyboardButton(text=config[k]["label"], callback_data=BUTTON_DEFS[k][1])
+            for k in visible
+        ])
+    b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_MENU))
+    return b.as_markup()
 
 
 async def button_list(pool: asyncpg.Pool) -> list[dict]:
@@ -91,10 +119,16 @@ async def button_list(pool: asyncpg.Pool) -> list[dict]:
     return [{"key": key, **config[key]} for key in BUTTON_DEFS]
 
 
-# Раскладки по имени экрана — для редактора кнопок на странице экрана (этап 22).
+# Раскладки по имени экрана — для редактора подписей кнопок в админке (этап 22).
+# Верхний уровень контекстен по статусу (этап 31), поэтому для редактора берём ОБЪЕДИНЕНИЕ
+# ключей гостя и подписчика (подписи общие по ключу — правятся независимо от показа).
+_TOP_UNION: list[list[str]] = [
+    ["join"], ["renew"], ["mysub"], ["events", "mytickets"], ["aboutmenu", "support"],
+]
 LAYOUTS: dict[str, list[list[str]]] = {
-    "welcome": WELCOME_LAYOUT,
-    "main": MAIN_LAYOUT,
+    "welcome": _TOP_UNION,
+    "main": _TOP_UNION,
+    "aboutmenu": ABOUTMENU_LAYOUT,
 }
 
 
