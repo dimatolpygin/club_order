@@ -111,29 +111,52 @@ def _parse_ids(raw: str | None) -> set[int]:
     }
 
 
-async def load_extra_admins(pool: asyncpg.Pool) -> set[int]:
-    """Загружает доп-админов из bot_settings в in-memory кеш. Вызывается при старте."""
-    global _extra_admins
+async def _read_extra_admins_db(pool: asyncpg.Pool) -> set[int]:
+    """Доп-админы прямо из bot_settings (источник истины, без кеша)."""
     stored = await repo.get_settings(pool, [KEY_EXTRA_ADMINS])
-    _extra_admins = _parse_ids(stored.get(KEY_EXTRA_ADMINS))
+    return _parse_ids(stored.get(KEY_EXTRA_ADMINS))
+
+
+async def load_extra_admins(pool: asyncpg.Pool) -> set[int]:
+    """Перечитывает доп-админов из bot_settings в in-memory кеш.
+
+    Вызывается ботом при старте и периодически (джоб в main.py): веб-админка —
+    отдельный процесс, её правки в bot_settings бот подхватывает только через
+    этот reload (а не через свой in-memory set).
+    """
+    global _extra_admins
+    _extra_admins = await _read_extra_admins_db(pool)
     return set(_extra_admins)
 
 
 def extra_admin_ids() -> set[int]:
-    """Текущий кеш доп-админов (синхронно, без БД)."""
+    """Текущий кеш доп-админов (синхронно, без БД) — для проверки прав в боте."""
     return _extra_admins
 
 
-async def _persist_extra_admins(pool: asyncpg.Pool) -> None:
-    value = ",".join(str(i) for i in sorted(_extra_admins))
+async def get_extra_admins(pool: asyncpg.Pool) -> list[int]:
+    """Список доп-админов из БД (для показа в веб-админке)."""
+    return sorted(await _read_extra_admins_db(pool))
+
+
+async def _persist_extra_admins(pool: asyncpg.Pool, ids: set[int]) -> None:
+    value = ",".join(str(i) for i in sorted(ids))
     await repo.set_setting(pool, KEY_EXTRA_ADMINS, value)
 
 
 async def add_extra_admin(pool: asyncpg.Pool, tg_id: int) -> None:
-    _extra_admins.add(tg_id)
-    await _persist_extra_admins(pool)
+    """Добавляет доп-админа. Read-modify-write по БД: веб-процесс с пустым
+    in-memory кешем не должен затереть уже сохранённых админов."""
+    global _extra_admins
+    ids = await _read_extra_admins_db(pool)
+    ids.add(tg_id)
+    await _persist_extra_admins(pool, ids)
+    _extra_admins = ids
 
 
 async def remove_extra_admin(pool: asyncpg.Pool, tg_id: int) -> None:
-    _extra_admins.discard(tg_id)
-    await _persist_extra_admins(pool)
+    global _extra_admins
+    ids = await _read_extra_admins_db(pool)
+    ids.discard(tg_id)
+    await _persist_extra_admins(pool, ids)
+    _extra_admins = ids

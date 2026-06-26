@@ -28,6 +28,7 @@ from .menu_buttons import router as menu_buttons_router
 from .promos import router as promos_router
 from .referral import router as referral_router
 from .screens import router as screens_router
+from .settings import router as settings_router
 from .stats import router as stats_router
 from .subscriptions import router as subscriptions_router
 from .tariffs import router as tariffs_router
@@ -52,6 +53,7 @@ app.include_router(tariffs_router)
 app.include_router(promos_router)
 app.include_router(broadcasts_router)
 app.include_router(screens_router)
+app.include_router(settings_router)
 # Старый раздел «Кнопки меню» (этап 19) свёрнут в «Экраны бота» (этап 22): пункт меню
 # убран из навигации, но роутер оставлен для прямых ссылок/закладок.
 app.include_router(menu_buttons_router)

@@ -120,6 +120,18 @@ async def main() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # Перечитываем доп-админов из БД (этап 27): их правят в веб-админке (отдельный
+    # процесс), а проверка прав в боте идёт по in-memory кешу. Частота — как у
+    # поллера платежей, чтобы веб-правки применялись без рестарта бота.
+    scheduler.add_job(
+        app_settings.load_extra_admins,
+        "interval",
+        minutes=settings.payment_poll_interval_min,
+        args=[pool],
+        id="reload_extra_admins",
+        max_instances=1,
+        coalesce=True,
+    )
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+{% block heading %}Настройки{% endblock %}
+{% block content %}
+
+{% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<h2 class="section-title">Напоминания о продлении</h2>
+<form method="post" action="/settings/reminders" class="card">
+  <p class="muted">За сколько целых единиц до конца подписки слать каждое напоминание
+  (0 — в последнюю единицу). Бот применяет правки сразу, без рестарта; проверка идёт
+  каждые {{ check_interval }} мин (частота — в .env).</p>
+  <div class="form-grid">
+    <div>
+      <label class="price-label">Единица порогов</label>
+      <select name="unit" class="input w-full">
+        {% for u, lbl in unit_labels.items() %}
+          <option value="{{ u }}"{% if u == unit %} selected{% endif %}>{{ lbl }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% for kind, lbl in rem_kinds %}
+    <div>
+      <label class="price-label">{{ lbl }}</label>
+      <input type="number" name="{{ kind }}" min="0" step="1" value="{{ offsets[kind] }}" class="input w-full" required>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="form-actions"><button type="submit" class="btn btn-primary">Сохранить напоминания</button></div>
+</form>
+
+<h2 class="section-title">Ссылка поддержки</h2>
+<form method="post" action="/settings/support" class="card">
+  <p class="muted">Куда ведёт кнопка «Перейти» в разделе «Поддержка» у пользователя.
+  Можно указать <code>@username</code> или ссылку <code>https://t.me/…</code>. Пусто —
+  кнопка скрыта. Применяется сразу.</p>
+  <div class="inline-form">
+    <span class="field-label">Аккаунт поддержки:</span>
+    <input type="text" name="url" value="{{ support_url or '' }}" placeholder="@club_support или https://t.me/club_support" class="input" style="min-width:340px">
+    <button type="submit" class="btn btn-primary">Сохранить</button>
+  </div>
+  {% if support_url %}
+    <p class="muted">Текущая: <code>{{ support_url }}</code></p>
+  {% else %}
+    <p class="muted">Ссылка не задана — кнопка «Перейти» у пользователя скрыта.</p>
+  {% endif %}
+</form>
+
+<h2 class="section-title">Администраторы доступа</h2>
+<div class="card">
+  <p class="muted">Кто получает заявки бота и доступ к управлению. <b>Основные</b> заданы
+  в настройках сервера (.env) и здесь не удаляются. <b>Добавленные</b> правятся отсюда —
+  бот подхватывает их в течение минуты.</p>
+
+  <form method="post" action="/settings/admins/add" class="inline-form">
+    <span class="field-label">Добавить по Telegram ID:</span>
+    <input type="text" name="tg_id" placeholder="например 123456789" class="input" style="min-width:200px" required>
+    <button type="submit" class="btn btn-primary">Добавить</button>
+  </form>
+
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Telegram ID</th><th>Тип</th><th></th></tr></thead>
+      <tbody>
+      {% for i in env_admins %}
+        <tr><td class="nowrap"><code>{{ i }}</code></td><td class="nowrap">основной</td><td></td></tr>
+      {% endfor %}
+      {% if not extra_admins %}
+        <tr><td colspan="3" class="muted">Добавленных администраторов нет.</td></tr>
+      {% endif %}
+      {% for i in extra_admins %}
+        <tr>
+          <td class="nowrap"><code>{{ i }}</code></td>
+          <td class="nowrap">добавленный</td>
+          <td class="nowrap">
+            <form method="post" action="/settings/admins/{{ i }}/remove" style="display:inline"
+                  onsubmit="return confirm('Убрать администратора {{ i }}? Он потеряет доступ.');">
+              <button type="submit" class="btn btn-danger">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<h2 class="section-title">Кто на каком экране</h2>
+<div class="card">
+  <p class="muted">Последний экран, на котором пользователь остановился (свежие сверху).
+  Чем больше «назад» — тем дольше человек не возвращался. Полную историю смотрите в логах
+  сервера. <a href="/settings#fsm">Обновить</a> — перезагрузите страницу.</p>
+  <div class="table-wrap" id="fsm">
+    <table class="table">
+      <thead><tr><th>Экран</th><th>Пользователь</th><th>ID</th><th>Когда</th></tr></thead>
+      <tbody>
+      {% if not fsm %}
+        <tr><td colspan="4" class="muted">Сейчас никто не в процессе.</td></tr>
+      {% endif %}
+      {% for f in fsm %}
+        <tr>
+          <td><b>{{ f.screen }}</b></td>
+          <td class="nowrap">{{ f.username }} {{ f.name }}</td>
+          <td class="nowrap"><code>{{ f.tg_id }}</code></td>
+          <td class="nowrap">{{ f.ago }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
