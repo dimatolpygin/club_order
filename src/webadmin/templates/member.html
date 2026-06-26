@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Участник {{ member.tg_id }}{% endblock %}
+{% block heading %}Участник {{ member.tg_id }}{% endblock %}
+{% block content %}
+
+{% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<p class="muted"><a href="/subscriptions">← Все подписки</a></p>
+
+{% if not member.found %}
+<div class="card">
+  <p>Пользователь <code>{{ member.tg_id }}</code> не найден в базе (ещё не запускал бота).</p>
+  <p class="muted">Можно выдать подписку вручную ниже — бот свяжет её с этим ID, когда
+  пользователь начнёт диалог и подаст заявку на вступление.</p>
+</div>
+{% else %}
+<div class="card">
+  <h3 class="section-title">Профиль</h3>
+  <table class="table">
+    <tr><td class="muted">Telegram ID</td><td><code>{{ member.tg_id }}</code></td></tr>
+    <tr><td class="muted">Username</td><td>{% if member.username %}@{{ member.username }}{% else %}—{% endif %}</td></tr>
+    <tr><td class="muted">Имя</td><td>{{ member.first_name or '—' }}</td></tr>
+    {% if member.email %}<tr><td class="muted">Email</td><td>{{ member.email }}</td></tr>{% endif %}
+    <tr><td class="muted">Статус</td><td>
+      {% if member.is_blocked %}<span class="badge badge-danger">заблокировал бота</span>{% else %}активен{% endif %}
+    </td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3 class="section-title">Подписка и доступ</h3>
+  {% if member.has_active %}
+    <p><span class="dot-ok"></span><b>Активна</b> · доступ в клуб: <b>да</b></p>
+    <table class="table">
+      <tr><td class="muted">Цена</td><td>{{ member.active.price }}</td></tr>
+      <tr><td class="muted">Период</td><td>{{ member.active.period }}</td></tr>
+      <tr><td class="muted">Действует</td><td>{{ member.active.start }} — {{ member.active.end }}</td></tr>
+      <tr><td class="muted">Осталось</td><td>{{ member.active.remaining }}</td></tr>
+      <tr><td class="muted">Источник</td><td>{{ member.active.source }}</td></tr>
+    </table>
+    <form method="post" action="/subscriptions/member/{{ member.tg_id }}/annul"
+          onsubmit="return confirm('Аннулировать активную подписку участника {{ member.tg_id }}? Доступ закроется, бот удалит его из группы на ближайшей проверке окончаний.');">
+      <button type="submit" class="btn btn-danger">Аннулировать подписку</button>
+    </form>
+  {% else %}
+    <p><span class="dot-off"></span><b>Нет активной подписки</b> · доступ в клуб: <b>нет</b></p>
+    {% if member.last %}
+    <p class="muted">Последняя подписка:</p>
+    <table class="table">
+      <tr><td class="muted">Цена</td><td>{{ member.last.price }}</td></tr>
+      <tr><td class="muted">Период</td><td>{{ member.last.period }}</td></tr>
+      <tr><td class="muted">Действовала</td><td>{{ member.last.start }} — {{ member.last.end }}</td></tr>
+      <tr><td class="muted">Статус</td><td>{{ member.last.status }}</td></tr>
+      <tr><td class="muted">Источник</td><td>{{ member.last.source }}</td></tr>
+    </table>
+    {% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="section-title">Выдать подписку вручную</h3>
+  <form method="post" action="/subscriptions/member/add" class="inline-form">
+    <input type="hidden" name="tg_id" value="{{ member.tg_id }}">
+    <input type="number" name="value" min="1" step="1" value="1" class="num-sm" required>
+    <select name="unit" class="input">
+      {% for u, lbl in unit_labels.items() %}
+        <option value="{{ u }}"{% if u == 'month' %} selected{% endif %}>{{ lbl }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-primary">Выдать</button>
+  </form>
+  <p class="muted">Создаёт активную подписку по текущей ставке (источник «вручную»).</p>
+</div>
+
+<div class="card">
+  <h3 class="section-title">История действий</h3>
+  <p class="muted">Что нажимал участник (свежее сверху, последние 20).</p>
+  {% if history %}
+  <table class="table">
+    <tbody>
+    {% for h in history %}
+      <tr><td>{{ h.event }}</td><td class="nowrap muted">{{ h.when }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Пока нет записей.</p>
+  {% endif %}
+</div>
+
+{% endblock %}
