@@ -111,28 +111,15 @@ async def _show(cb: CallbackQuery, text: str, b: InlineKeyboardBuilder) -> None:
 
 
 # ── Вход ─────────────────────────────────────────────────────────────────────
-# Этап 27: панель /admin заморожена — весь функционал перенесён в веб-админку.
-# Команда оставлена, но показывает уведомление, а не панель. Колбэк-хендлеры ниже
-# (adm:*) остаются в коде, но недостижимы (входной экран с кнопками не показывается).
-_FROZEN_TEXT = (
-    "<b>Админ-панель в боте отключена.</b>\n\n"
-    "Весь функционал управления перенесён в веб-админку:\n"
-    "<b>https://admin.agat-key.ru</b>\n\n"
-    "Там — мероприятия, билеты, подписки, тарифы, промокоды, рефералка, рассылка, "
-    "тексты экранов и настройки (напоминания, поддержка, администраторы, диагностика)."
-)
-
-
+# Этап 27: /admin оставлен для быстрого доступа из бота (решение заказчика) —
+# полный функционал также есть в веб-админке, разделы дублируются.
 @router.message(Command("admin"))
 async def cmd_admin(message: Message, state: FSMContext) -> None:
     if not _is_admin(message.from_user.id):
         return
     await state.clear()
-    await message.answer(_FROZEN_TEXT)
-    logger.info(
-        f"⚙️ Админ @{message.from_user.username or '—'} вызвал /admin "
-        "(панель заморожена → веб-админка)"
-    )
+    await message.answer(_MAIN_TEXT, reply_markup=_main_kb().as_markup())
+    logger.info(f"⚙️ Админ @{message.from_user.username or '—'} открыл панель")
 
 
 @router.callback_query(F.data == "adm:menu")
