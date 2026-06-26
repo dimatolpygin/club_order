@@ -21,7 +21,6 @@ from .. import repo
 # Реестр: ключ → (дефолтная подпись, callback). Порядок определяет порядок в админке.
 BUTTON_DEFS: dict[str, tuple[str, str]] = {
     "join": ("Вступить в клуб", kb.NAV_JOIN),
-    "renew": ("Продлить подписку", kb.NAV_RENEW),
     "mysub": ("Моя подписка", kb.NAV_MYSUB),
     "promo": ("Ввести промокод", kb.NAV_PROMO),
     "events": ("Мероприятия", kb.NAV_EVENTS),
@@ -37,11 +36,13 @@ BUTTON_DEFS: dict[str, tuple[str, str]] = {
 # статусу подписки, главное действие — первым рядом во всю ширину (иерархия позицией,
 # без эмодзи). Инфо/рефералка спрятаны в подменю «О клубе» (aboutmenu). Промокода на
 # верхнем уровне нет — ввод остаётся в флоу оплаты/тарифа.
+# Управление подпиской — ОДИН раздел: гость видит «Вступить», подписчик — «Моя подписка»
+# (продление живёт ВНУТРИ этого экрана, не дублируется на верхнем уровне).
 LAYOUT_GUEST: list[list[str]] = [
     ["join"], ["events", "mytickets"], ["aboutmenu", "support"],
 ]
 LAYOUT_SUB: list[list[str]] = [
-    ["renew"], ["mysub"], ["events", "mytickets"], ["aboutmenu", "support"],
+    ["mysub"], ["events", "mytickets"], ["aboutmenu", "support"],
 ]
 # Подменю «О клубе» (открывается по кнопке aboutmenu).
 ABOUTMENU_LAYOUT: list[list[str]] = [
@@ -123,7 +124,7 @@ async def button_list(pool: asyncpg.Pool) -> list[dict]:
 # Верхний уровень контекстен по статусу (этап 31), поэтому для редактора берём ОБЪЕДИНЕНИЕ
 # ключей гостя и подписчика (подписи общие по ключу — правятся независимо от показа).
 _TOP_UNION: list[list[str]] = [
-    ["join"], ["renew"], ["mysub"], ["events", "mytickets"], ["aboutmenu", "support"],
+    ["join"], ["mysub"], ["events", "mytickets"], ["aboutmenu", "support"],
 ]
 LAYOUTS: dict[str, list[list[str]]] = {
     "welcome": _TOP_UNION,
