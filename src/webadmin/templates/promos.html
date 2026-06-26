@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Промокоды{% endblock %}
+{% block heading %}Промокоды{% endblock %}
+{% block content %}
+
+{% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<p class="muted">Промокоды на подписку 11:11. Тип «скидка %» уменьшает цену на процент,
+«спец-цена ₽/мес» задаёт фиксированную ставку за месяц. Лимит — сколько раз код можно
+применить всего (один пользователь применяет код один раз). Правки действуют в боте сразу.</p>
+
+<h3 class="section-title">Создать промокод</h3>
+<form method="post" action="/promos/create" class="card">
+  <div class="form-grid">
+    <div>
+      <label class="price-label">Код</label>
+      <input type="text" name="code" maxlength="32" placeholder="например LAUNCH11" class="input w-full" required>
+    </div>
+    <div>
+      <label class="price-label">Тип</label>
+      <select name="kind" class="input w-full">
+        <option value="percent">Скидка %</option>
+        <option value="fixed_price">Спец-цена ₽/мес</option>
+      </select>
+    </div>
+    <div>
+      <label class="price-label">Значение</label>
+      <input type="text" name="value" placeholder="процент 1–99 или ₽/мес" class="input w-full" required>
+    </div>
+    <div>
+      <label class="price-label">Лимит активаций</label>
+      <input type="text" name="limit" value="0" placeholder="0 — без лимита" class="input w-full">
+    </div>
+    <div>
+      <label class="price-label">Срок действия, дней</label>
+      <input type="text" name="expiry_days" value="0" placeholder="0 — бессрочно" class="input w-full">
+    </div>
+    <div class="field-wide">
+      <label class="check">
+        <input type="checkbox" name="fixes_price">
+        Фиксировать цену за пользователем (продления по этой ставке)
+      </label>
+    </div>
+  </div>
+  <div class="form-actions"><button type="submit" class="btn btn-primary">Создать промокод</button></div>
+</form>
+
+<h3 class="section-title">Все промокоды</h3>
+<div class="card">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Код</th><th>Условие</th><th>Использовано</th><th>Срок</th><th>Фиксация</th><th>Статус</th><th></th></tr>
+      </thead>
+      <tbody>
+      {% if not promos %}
+        <tr><td colspan="7" class="muted">Пока нет ни одного промокода.</td></tr>
+      {% endif %}
+      {% for p in promos %}
+        <tr {% if not p.is_active %}class="row-hidden"{% endif %}>
+          <td class="nowrap"><b>#{{ p.id }}</b> <code>{{ p.code }}</code></td>
+          <td class="nowrap">{{ p.cond }}</td>
+          <td class="nowrap">{{ p.used }}</td>
+          <td class="nowrap">{{ p.expiry }}</td>
+          <td class="nowrap">{{ p.fix }}</td>
+          <td class="nowrap">
+            {% if p.is_active %}<span class="dot-ok"></span>вкл{% else %}<span class="dot-off"></span>выкл{% endif %}
+          </td>
+          <td class="nowrap">
+            <form method="post" action="/promos/{{ p.id }}/toggle" style="display:inline">
+              <button type="submit" class="btn">{{ "Выключить" if p.is_active else "Включить" }}</button>
+            </form>
+            <form method="post" action="/promos/{{ p.id }}/delete" style="display:inline"
+                  onsubmit="return confirm('Удалить промокод «{{ p.code }}»? Код исчезнет из списка, применить его будет нельзя. История активаций удалится, в платежах ссылка на код обнулится (сами платежи и оформленные подписки сохранятся).');">
+              <button type="submit" class="btn btn-danger">Удалить</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
