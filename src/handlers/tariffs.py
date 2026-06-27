@@ -25,8 +25,15 @@ router = Router()
 
 
 async def _edit(cb: CallbackQuery, text: str, markup) -> None:
-    with suppress(TelegramBadRequest):
-        await cb.message.edit_text(text, reply_markup=markup)
+    # Текущее сообщение может быть фото (инфо-экран с картинкой, этап 37): по фото
+    # edit_text невозможен — заменяем сообщение (удаляем и шлём заново).
+    if cb.message.photo:
+        with suppress(TelegramBadRequest):
+            await cb.message.delete()
+        await cb.message.answer(text, reply_markup=markup)
+    else:
+        with suppress(TelegramBadRequest):  # «message is not modified» — не критично
+            await cb.message.edit_text(text, reply_markup=markup)
     await cb.answer()
 
 
