@@ -456,6 +456,24 @@ input[type="file"].input { height: auto; padding: 9px 12px; line-height: 1.4; }
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   /* Переключатель периода на дашборде не вылазит за экран. */
   .segmented { display: flex; flex-wrap: wrap; }
+  /* Кастомный период (два date-поля + кнопка) — переносится, поля тянутся. */
+  .period-custom { flex-wrap: wrap; }
+  .period-custom .input-date { flex: 1 1 120px; min-width: 0; }
+  /* Шапка блока графиков — заголовок и выпадающий список в перенос, селект во всю ширину. */
+  .chart-head { flex-wrap: wrap; gap: 8px; }
+  .chart-select { max-width: 100%; width: 100%; }
   /* Гриды форм/экранов — в одну колонку. */
   .form-grid, .screen-grid { grid-template-columns: 1fr; }
+  /* Формы в карточках (подписки/настройки) — контролы в столбик во всю ширину.
+     min-width:…!important перебивает инлайновые min-width у полей (340/220/200px),
+     иначе они вылазят за карточку и за экран. */
+  .card .inline-form { flex-wrap: wrap; gap: 8px; }
+  .card .inline-form .field-label { width: 100%; }
+  .card .inline-form .input,
+  .card .inline-form select,
+  .card .inline-form .num-sm,
+  .card .inline-form .btn { width: 100%; min-width: 0 !important; }
+  /* Подстраховка: случайно широкий ребёнок не двигает всю страницу вбок
+     (таблицы скроллятся в своём .table-wrap независимо). */
+  .content { overflow-x: hidden; }
 }
