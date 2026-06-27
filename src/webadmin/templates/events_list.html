@@ -83,13 +83,41 @@
   <a class="btn btn-primary" href="/events/new">Добавить мероприятие</a>
 </div>
 
-<h2 class="section-title">Предстоящие</h2>
+{# ── Поиск + фильтры (этап 36) ────────────────────────────────────────────── #}
+<form class="filter-bar" method="get" action="/events">
+  <input class="input" type="search" name="q" value="{{ search }}"
+         placeholder="Название мероприятия" style="min-width:220px">
+  <select class="input" name="kind" onchange="this.form.submit()">
+    {% for val, lbl in kind_filter.items() %}
+      <option value="{{ val }}"{% if kind_f == val %} selected{% endif %}>{{ lbl }}</option>
+    {% endfor %}
+  </select>
+  <select class="input" name="status" onchange="this.form.submit()">
+    {% for val, lbl in status_filter.items() %}
+      <option value="{{ val }}"{% if status_f == val %} selected{% endif %}>{{ lbl }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-light btn-sm">Найти</button>
+  {% if has_filter %}<a class="btn btn-light btn-sm" href="/events">Сбросить</a>{% endif %}
+</form>
+
+<h2 class="section-title">Предстоящие ({{ upcoming_count }})</h2>
 {% if upcoming %}{{ events_table(upcoming) }}
+{% elif has_filter %}<div class="empty">Под фильтры предстоящих мероприятий не найдено.</div>
 {% else %}<div class="empty">Пока нет предстоящих мероприятий. Нажмите «Добавить мероприятие».</div>{% endif %}
 
+<h2 class="section-title section-muted">Прошедшие ({{ past_total }})</h2>
 {% if past %}
-<h2 class="section-title section-muted">Прошедшие</h2>
 {{ events_table(past) }}
+{% if past_pages > 1 %}
+  {% set qs = 'q=' ~ (search|urlencode) ~ '&kind=' ~ kind_f ~ '&status=' ~ status_f %}
+  <div class="pager" style="display:flex;gap:12px;align-items:center;margin:12px 0">
+    {% if page > 1 %}<a class="btn btn-sm btn-light" href="/events?{{ qs }}&page={{ page - 1 }}">← Назад</a>{% endif %}
+    <span class="muted">Страница {{ page }} из {{ past_pages }}</span>
+    {% if page < past_pages %}<a class="btn btn-sm btn-light" href="/events?{{ qs }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
+  </div>
 {% endif %}
+{% elif has_filter %}<div class="empty">Под фильтры прошедших мероприятий не найдено.</div>
+{% else %}<div class="empty">Прошедших мероприятий пока нет.</div>{% endif %}
 
 {% endblock %}

@@ -18,6 +18,76 @@ async def list_events(pool: asyncpg.Pool) -> list[asyncpg.Record]:
     )
 
 
+def _events_filters(
+    base_clause: str, search: str | None, kind: str | None, status: str | None
+) -> tuple[str, list]:
+    """WHERE-условие и параметры для списков мероприятий (этап 36).
+
+    base_clause — стартовое условие времени (`starts_at >= now()` для предстоящих,
+    `starts_at < now()` для прошедших). search — ILIKE по названию (частичный,
+    регистронезависимо). kind — 'banya'/'retreat' (иначе все). status — 'active'
+    (в боте), 'hidden' (скрыто), 'canceled' (отменено), иначе все.
+    """
+    clauses = [base_clause]
+    params: list = []
+    if kind in ("banya", "retreat"):
+        params.append(kind)
+        clauses.append(f"kind = ${len(params)}")
+    if status == "active":
+        clauses.append("is_active = true AND canceled_at IS NULL")
+    elif status == "hidden":
+        clauses.append("is_active = false AND canceled_at IS NULL")
+    elif status == "canceled":
+        clauses.append("canceled_at IS NOT NULL")
+    s = (search or "").strip()
+    if s:
+        params.append(f"%{s}%")
+        clauses.append(f"title ILIKE ${len(params)}")
+    return " AND ".join(clauses), params
+
+
+async def list_upcoming_events(
+    pool: asyncpg.Pool, *, search: str | None = None,
+    kind: str | None = None, status: str | None = None,
+) -> list[asyncpg.Record]:
+    """Предстоящие события под фильтры (этап 36). Без пагинации — их мало."""
+    where, params = _events_filters("starts_at >= now()", search, kind, status)
+    return await pool.fetch(
+        f"SELECT {_EVENT_COLS} FROM events WHERE {where} ORDER BY starts_at", *params
+    )
+
+
+async def list_past_events(
+    pool: asyncpg.Pool, *, search: str | None = None,
+    kind: str | None = None, status: str | None = None,
+    limit: int | None = None, offset: int = 0,
+) -> list[asyncpg.Record]:
+    """Прошедшие события под фильтры + пагинация (этап 36). Свежие сверху."""
+    where, params = _events_filters("starts_at < now()", search, kind, status)
+    tail = ""
+    if limit is not None:
+        params.append(limit)
+        tail += f" LIMIT ${len(params)}"
+        params.append(offset)
+        tail += f" OFFSET ${len(params)}"
+    return await pool.fetch(
+        f"SELECT {_EVENT_COLS} FROM events WHERE {where} "
+        f"ORDER BY starts_at DESC{tail}",
+        *params,
+    )
+
+
+async def count_past_events(
+    pool: asyncpg.Pool, *, search: str | None = None,
+    kind: str | None = None, status: str | None = None,
+) -> int:
+    """Число прошедших событий под текущие фильтры (для пагинации, этап 36)."""
+    where, params = _events_filters("starts_at < now()", search, kind, status)
+    return await pool.fetchval(
+        f"SELECT count(*) FROM events WHERE {where}", *params
+    )
+
+
 async def get_event(pool: asyncpg.Pool, event_id: int) -> asyncpg.Record | None:
     return await pool.fetchrow(
         f"SELECT {_EVENT_COLS} FROM events WHERE id = $1", event_id

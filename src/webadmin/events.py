@@ -1,7 +1,7 @@
 """Раздел админки «Мероприятия»: CRUD событий и цен по типам билетов."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
@@ -28,6 +28,13 @@ KINDS: list[tuple[str, str]] = [
 ]
 _KIND_LABEL = dict(KINDS)
 _TYPE_LABEL = dict(TICKET_TYPES)
+
+# Фильтры списка мероприятий (этап 36). Значение → подпись.
+KIND_FILTER = {"": "Все направления", "banya": "Энерго Баня", "retreat": "Ретрит"}
+STATUS_FILTER = {
+    "": "Любой статус", "active": "В боте", "hidden": "Скрыто", "canceled": "Отменено",
+}
+PAST_PER_PAGE = 30
 
 
 def _parse_int(raw: str | None, *, default=None):
@@ -141,15 +148,33 @@ def _parse_submit(form) -> tuple[dict, dict, dict, str | None]:
 async def events_list(request: Request):
     current_admin(request)
     pool = get_pool()
-    events = await events_repo.list_events(pool)
+    # Фильтры (этап 36): поиск по названию · направление · статус · страница архива.
+    search = request.query_params.get("q", "").strip()
+    kind = request.query_params.get("kind", "")
+    kind = kind if kind in KIND_FILTER else ""
+    status = request.query_params.get("status", "")
+    status = status if status in STATUS_FILTER else ""
+    raw_p = request.query_params.get("page", "1")
+    page = int(raw_p) if raw_p.strip().isdigit() else 1
+
+    upcoming = await events_repo.list_upcoming_events(
+        pool, search=search, kind=kind, status=status
+    )
+    past_total = await events_repo.count_past_events(
+        pool, search=search, kind=kind, status=status
+    )
+    past_pages = max(1, (past_total + PAST_PER_PAGE - 1) // PAST_PER_PAGE)
+    page = min(max(1, page), past_pages)
+    past = await events_repo.list_past_events(
+        pool, search=search, kind=kind, status=status,
+        limit=PAST_PER_PAGE, offset=(page - 1) * PAST_PER_PAGE,
+    )
+
     prices = await events_repo.prices_by_event(pool)
     counts = await events_repo.ticket_counts_by_event(pool)
     # Занятые места по событию: {event_id: {male, female, total}} (пара = 2 места).
     occupancy = {eid: events_logic.seats_occupied(c) for eid, c in counts.items()}
-    now = datetime.now(timezone.utc)
-    upcoming, past = [], []
-    for e in events:
-        (upcoming if e["starts_at"] >= now else past).append(e)
+    has_filter = bool(search or kind or status)
     return templates.TemplateResponse(
         request, "events_list.html",
         {
@@ -157,6 +182,11 @@ async def events_list(request: Request):
             "upcoming": upcoming, "past": past, "prices": prices,
             "occupancy": occupancy,
             "kind_label": _KIND_LABEL, "type_label": _TYPE_LABEL, "ticket_types": TICKET_TYPES,
+            "search": search, "kind_f": kind, "status_f": status,
+            "kind_filter": KIND_FILTER, "status_filter": STATUS_FILTER,
+            "has_filter": has_filter,
+            "upcoming_count": len(upcoming), "past_total": past_total,
+            "page": page, "past_pages": past_pages, "per_page": PAST_PER_PAGE,
         },
     )
 
