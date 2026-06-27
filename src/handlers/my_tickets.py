@@ -71,10 +71,21 @@ async def show_my_tickets(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMConte
 async def _owned_ticket(
     cb: CallbackQuery, pool: asyncpg.Pool, ticket_id: int
 ) -> asyncpg.Record | None:
-    """Билет пользователя в статусе 'paid' или None (с попапом «не найден»)."""
+    """Билет пользователя в статусе 'paid' или None (с попапом-объяснением).
+
+    Посещённый билет (отмечен приход на входе, этап 34) считается использованным:
+    карточка/возврат по нему недоступны — даже если пользователь жмёт по старой кнопке
+    из ранее открытого сообщения.
+    """
     ticket = await repo.get_ticket(pool, ticket_id)
     if ticket is None or ticket["tg_id"] != cb.from_user.id or ticket["status"] != "paid":
         await cb.answer("Билет не найден.", show_alert=True)
+        return None
+    if ticket["attended_at"] is not None:
+        await cb.answer(
+            "Этот билет уже использован (отмечен на входе) — возврат недоступен.",
+            show_alert=True,
+        )
         return None
     return ticket
 

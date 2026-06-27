@@ -698,8 +698,10 @@ async def get_ticket(pool: asyncpg.Pool, ticket_id: int) -> asyncpg.Record | Non
 async def list_active_tickets(pool: asyncpg.Pool, tg_id: int) -> list[asyncpg.Record]:
     """Активные билеты пользователя (этап 18): оплаченные на будущие события.
 
-    Прошедшие события скрыты (`starts_at > now()`). К каждому билету подтягиваем
-    данные события (название/тип/дата/адрес) для карточки. Сортировка — по дате.
+    Прошедшие события скрыты (`starts_at > now()`). Посещённые билеты (отмечен приход
+    на входе, `attended_at IS NOT NULL`, этап 34) тоже скрыты — билет использован,
+    возврат по нему недоступен. К каждому билету подтягиваем данные события
+    (название/тип/дата/адрес) для карточки. Сортировка — по дате.
     """
     return await pool.fetch(
         """
@@ -708,7 +710,8 @@ async def list_active_tickets(pool: asyncpg.Pool, tg_id: int) -> list[asyncpg.Re
                e.title, e.kind, e.starts_at, e.address
         FROM tickets t
         JOIN events e ON e.id = t.event_id
-        WHERE t.tg_id = $1 AND t.status = 'paid' AND e.starts_at > now()
+        WHERE t.tg_id = $1 AND t.status = 'paid'
+          AND t.attended_at IS NULL AND e.starts_at > now()
         ORDER BY e.starts_at
         """,
         tg_id,
