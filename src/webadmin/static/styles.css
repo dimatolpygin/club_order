@@ -342,6 +342,12 @@ input[type="file"].input { height: auto; padding: 9px 12px; line-height: 1.4; }
 .filter-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
 .filter-bar .field-label { white-space: nowrap; }
 .filter-bar .input { min-width: 320px; max-width: 100%; }
+/* Дата покупки — компактный блок в две строки (этап 33): «Куплен с:» над «по:»,
+   поля выровнены друг под другом, не растягиваются правилом .filter-bar .input. */
+.date-range { display: flex; flex-direction: column; gap: 6px; }
+.date-range .date-row { display: flex; align-items: center; gap: 8px; }
+.date-range .field-label { width: 70px; text-align: right; white-space: nowrap; }
+.filter-bar .date-range .input { min-width: 0; width: 160px; }
 .link-tg { font-size: 12.5px; color: var(--blue-ink); text-decoration: none; }
 .link-tg:hover { text-decoration: underline; }
 

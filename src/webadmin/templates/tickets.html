@@ -18,16 +18,23 @@
     {% endfor %}
   </select>
   <input class="input" type="search" name="q" value="{{ search }}"
-         placeholder="Имя, @username или ID" style="min-width:220px">
+         placeholder="Имя, @username, ID или #номер" style="min-width:220px">
   <select class="input" name="status" onchange="this.form.submit()">
     {% for val, lbl in status_labels.items() %}
       <option value="{{ val }}"{% if status_f == val %} selected{% endif %}>{{ lbl }}</option>
     {% endfor %}
   </select>
-  <label class="field-label" for="from">Куплен с:</label>
-  <input class="input" type="date" id="from" name="from" value="{{ date_from }}">
-  <label class="field-label" for="to">по:</label>
-  <input class="input" type="date" id="to" name="to" value="{{ date_to }}">
+  {# Дата покупки — отдельный блок в две строки, чтобы не разъезжался при wrap (этап 33). #}
+  <div class="date-range">
+    <div class="date-row">
+      <label class="field-label" for="from">Куплен с:</label>
+      <input class="input input-date" type="date" id="from" name="from" value="{{ date_from }}">
+    </div>
+    <div class="date-row">
+      <label class="field-label" for="to">по:</label>
+      <input class="input input-date" type="date" id="to" name="to" value="{{ date_to }}">
+    </div>
+  </div>
   <button type="submit" class="btn btn-light btn-sm">Найти</button>
   {% if search or status_f or date_from or date_to %}
     <a class="btn btn-light btn-sm" href="/tickets?event_id={{ selected_event or '' }}">Сбросить</a>
@@ -83,13 +90,14 @@
   <table class="table">
     <thead>
       <tr>
-        <th>Куплен</th><th>Событие</th><th>Покупатель</th>
+        <th>№</th><th>Куплен</th><th>Событие</th><th>Покупатель</th>
         <th>Тип</th><th>Цена</th><th>Статус</th><th></th>
       </tr>
     </thead>
     <tbody>
     {% for t in tickets %}
       <tr class="{{ 'row-hidden' if t.status == 'refunded' else '' }}">
+        <td class="nowrap"><b>№{{ t.id }}</b></td>
         <td class="nowrap">{{ t.created_at.strftime('%d.%m.%Y · %H:%M') }}</td>
         <td>
           {{ kind_label.get(t.kind, t.kind) }} · {{ t.title }}

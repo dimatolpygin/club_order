@@ -320,9 +320,10 @@ def my_tickets_kb(tickets: list) -> InlineKeyboardMarkup:
     for t in tickets:
         # У билета с запрошенным возвратом — метка прямо в подписи кнопки.
         suffix = " — возврат запрошен" if t["refund_requested"] else ""
+        # Номер билета (этап 33) — чтобы покупатель мог назвать его менеджеру.
         b.row(
             InlineKeyboardButton(
-                text=f"{t['title']} · {t['starts_at']:%d.%m}{suffix}",
+                text=f"№{t['id']} · {t['title']} · {t['starts_at']:%d.%m}{suffix}",
                 callback_data=f"{MYT_OPEN}:{t['id']}",
             )
         )

@@ -741,13 +741,38 @@ async def set_ticket_rules_agreed(pool: asyncpg.Pool, ticket_id: int) -> None:
 
 
 # ── Отметка фактического возврата билета (этап 21) ────────────────────────────
+def _ticket_search_clause(params: list, search: str | None) -> str | None:
+    """SQL-фрагмент поиска билета: имя / @username / Telegram ID + НОМЕР билета (этап 33).
+
+    Аппендит значения в `params` (сквозная нумерация $-параметров) и возвращает условие
+    в скобках, либо None для пустого поиска. Правила:
+    - `#123` (или `# 123`) — точный номер билета `t.id = 123`;
+    - просто число `123` — частичный поиск по tg_id ИЛИ точный номер билета (`t.id`);
+    - текст — частичный регистронезависимый по @username/имени.
+    """
+    s = (search or "").strip()
+    if not s:
+        return None
+    if s.startswith("#") and s[1:].strip().isdigit():
+        params.append(int(s[1:].strip()))
+        return f"t.id = ${len(params)}"
+    params.append(f"%{s}%")
+    i = len(params)
+    sub = (f"u.username ILIKE ${i} OR u.first_name ILIKE ${i} "
+           f"OR CAST(t.tg_id AS TEXT) LIKE ${i}")
+    if s.isdigit():
+        params.append(int(s))
+        sub += f" OR t.id = ${len(params)}"
+    return f"({sub})"
+
+
 def _sold_tickets_filters(
     event_id: int | None, search: str | None, status: str | None,
     date_from=None, date_to=None,
 ) -> tuple[str, list]:
     """Строит WHERE-условие и параметры для списка/счётчика проданных билетов (этап 32).
 
-    Поиск — по имени / @username / Telegram ID (частичное, регистронезависимо).
+    Поиск — по имени / @username / Telegram ID / номеру билета (`#N` или число; этап 33).
     status: 'paid' (оплачен, без запроса возврата) · 'refund_requested' · 'refunded' ·
     иначе все ('paid'+'refunded'). date_from/date_to — диапазон ДАТЫ ПОКУПКИ (включительно).
     """
@@ -768,14 +793,9 @@ def _sold_tickets_filters(
     if date_to is not None:
         params.append(date_to)
         clauses.append(f"t.created_at::date <= ${len(params)}")
-    s = (search or "").strip()
-    if s:
-        params.append(f"%{s}%")
-        i = len(params)
-        clauses.append(
-            f"(u.username ILIKE ${i} OR u.first_name ILIKE ${i} "
-            f"OR CAST(t.tg_id AS TEXT) LIKE ${i})"
-        )
+    search_clause = _ticket_search_clause(params, search)
+    if search_clause:
+        clauses.append(search_clause)
     return " AND ".join(clauses), params
 
 
@@ -855,14 +875,9 @@ async def list_checkin_tickets(
     if date_to is not None:
         params.append(date_to)
         clauses.append(f"t.created_at::date <= ${len(params)}")
-    s = (search or "").strip()
-    if s:
-        params.append(f"%{s}%")
-        i = len(params)
-        clauses.append(
-            f"(u.username ILIKE ${i} OR u.first_name ILIKE ${i} "
-            f"OR CAST(t.tg_id AS TEXT) LIKE ${i})"
-        )
+    search_clause = _ticket_search_clause(params, search)
+    if search_clause:
+        clauses.append(search_clause)
     where = " AND ".join(clauses)
     return await pool.fetch(
         f"""

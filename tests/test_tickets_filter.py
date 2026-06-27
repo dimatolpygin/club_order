@@ -69,6 +69,38 @@ def main() -> None:
     check("комбо событие+дата+поиск: параметры", params, [7, d1, "%Gats%"])
     check("комбо: поиск получил $3", "ILIKE $3" in where, True)
 
+    # Поиск по номеру билета (этап 33).
+    # «#123» — точный номер, без ILIKE.
+    where, params = repo._sold_tickets_filters(None, "#123", None)
+    check("номер #123: точный t.id", "t.id = $1" in where, True)
+    check("номер #123: без ILIKE", "ILIKE" not in where, True)
+    check("номер #123: параметр-число", params, [123])
+
+    # «# 123» с пробелом — тоже точный номер.
+    where, params = repo._sold_tickets_filters(None, "# 123", None)
+    check("номер # 123 (пробел): точный t.id", "t.id = $1" in where, True)
+    check("номер # 123: параметр-число", params, [123])
+
+    # Просто число — частичный tg_id ИЛИ точный номер билета.
+    where, params = repo._sold_tickets_filters(None, "42", None)
+    check("число 42: ILIKE по tg_id", "CAST(t.tg_id AS TEXT) LIKE $1" in where, True)
+    check("число 42: точный t.id вторым параметром", "t.id = $2" in where, True)
+    check("число 42: параметры", params, ["%42%", 42])
+
+    # Число со сквозной нумерацией после события.
+    where, params = repo._sold_tickets_filters(7, "42", None)
+    check("событие+число: $2 ILIKE, $3 t.id", "ILIKE $2" in where and "t.id = $3" in where, True)
+    check("событие+число: параметры", params, [7, "%42%", 42])
+
+    # Текстовый поиск (не число) — t.id не участвует.
+    where, params = repo._sold_tickets_filters(None, "Gats", None)
+    check("текст: без t.id =", "t.id =" not in where, True)
+
+    # «#» без числа — трактуется как обычный текст (ILIKE), не падает.
+    where, params = repo._sold_tickets_filters(None, "#abc", None)
+    check("#abc: обычный ILIKE", "ILIKE $1" in where, True)
+    check("#abc: параметр-текст", params, ["%#abc%"])
+
     print("\nВсе проверки пройдены.")
 
 

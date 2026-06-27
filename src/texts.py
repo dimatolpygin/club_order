@@ -619,14 +619,18 @@ def my_tickets_list(count: int) -> str:
 def ticket_detail(
     title: str, kind_label: str, ticket_label: str, starts_at, price: str,
     rules_text: str = "", address: str = "", refund_requested: bool = False,
+    ticket_id: int | None = None,
 ) -> str:
     """Карточка одного билета в разделе «Мои билеты» — всё на одном экране.
 
     Билет уже оплачен, поэтому адрес и правила показываем сразу (без отдельного
     шага согласия — он нужен только при первичной выдаче билета).
     """
+    # Номер билета (этап 33) — покупатель называет его менеджеру при вопросах/возврате.
+    num = f"Номер билета: <b>№{ticket_id}</b>\n" if ticket_id is not None else ""
     head = (
         "<b>БИЛЕТ</b>\n\n"
+        f"{num}"
         f"Событие: <b>{title}</b>\n"
         f"Направление: {kind_label}\n"
         f"Тип билета: {ticket_label}\n"

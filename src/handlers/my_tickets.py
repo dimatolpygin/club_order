@@ -97,7 +97,7 @@ async def open_ticket(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         ev.ticket_label(ticket["ticket_type"]), event["starts_at"],
         fmt_price(ticket["price"]),
         rules_text=event["rules_text"], address=event["address"],
-        refund_requested=refund_requested,
+        refund_requested=refund_requested, ticket_id=ticket_id,
     )
     await _edit(cb, text, kb.ticket_detail_kb(ticket_id, refund_requested))
     logger.info(
