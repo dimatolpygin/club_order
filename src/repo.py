@@ -787,6 +787,10 @@ def _sold_tickets_filters(
         clauses.append("t.status = 'paid' AND t.refund_requested = true")
     elif status == "refunded":
         clauses.append("t.status = 'refunded'")
+    elif status == "attended":
+        clauses.append("t.status = 'paid' AND t.attended_at IS NOT NULL")
+    elif status == "not_attended":
+        clauses.append("t.status = 'paid' AND t.attended_at IS NULL")
     if date_from is not None:
         params.append(date_from)
         clauses.append(f"t.created_at::date >= ${len(params)}")
@@ -823,6 +827,7 @@ async def list_sold_tickets(
                t.refund_requested, t.refund_requested_at,
                t.refunded_at, t.refunded_by,
                t.refund_notified_at, t.refund_notify_failed, t.created_at,
+               t.attended_at, t.attended_by,
                u.username, u.first_name,
                e.id AS event_id, e.title, e.kind, e.starts_at
         FROM tickets t
@@ -938,6 +943,81 @@ async def mark_ticket_refunded(
                 "event_id": row["event_id"],
                 "referral_voided": voided,
             }
+
+
+# Типы парных билетов (2 человека на входе) — для подсчёта людей в чек-ине (этап 34).
+_PAIR_TICKET_TYPES = ("pair_mf", "pair_ff", "pair_mm")
+# SQL-выражение «сколько людей по билету» (парный = 2, иначе 1).
+_PEOPLE_EXPR = (
+    "CASE WHEN ticket_type IN ('pair_mf', 'pair_ff', 'pair_mm') THEN 2 ELSE 1 END"
+)
+
+
+async def mark_ticket_attended(pool: asyncpg.Pool, ticket_id: int, by: str) -> str:
+    """Отмечает приход по билету на входе (чек-ин, этап 34).
+
+    Идемпотентно (защита от двойного прохода): обновляет только оплаченный и ещё не
+    отмеченный билет, фиксируя время (attended_at) и логин админа (attended_by).
+    Возвращает: 'ok' (отметил), 'already' (билет уже отмечен — повтор не задваивает),
+    'not_found' (нет такого оплаченного билета).
+    """
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE tickets SET attended_at = now(), attended_by = $2 "
+            "WHERE id = $1 AND status = 'paid' AND attended_at IS NULL "
+            "RETURNING id",
+            ticket_id, by,
+        )
+        if row is not None:
+            return "ok"
+        t = await conn.fetchrow(
+            "SELECT status, attended_at FROM tickets WHERE id = $1", ticket_id
+        )
+        if t is not None and t["status"] == "paid" and t["attended_at"] is not None:
+            return "already"
+        return "not_found"
+
+
+async def unmark_ticket_attended(pool: asyncpg.Pool, ticket_id: int) -> bool:
+    """Снимает отметку прихода (ошибочное нажатие на входе, этап 34).
+
+    Возвращает True, если отметка была снята; False — если билета нет, он не оплачен
+    или ещё не был отмечен.
+    """
+    row = await pool.fetchrow(
+        "UPDATE tickets SET attended_at = NULL, attended_by = NULL "
+        "WHERE id = $1 AND status = 'paid' AND attended_at IS NOT NULL "
+        "RETURNING id",
+        ticket_id,
+    )
+    return row is not None
+
+
+async def checkin_stats(pool: asyncpg.Pool, event_id: int | None = None) -> dict:
+    """Сводка чек-ина (этап 34): билетов и ЛЮДЕЙ — оплачено всего / пришло.
+
+    Людей считаем с учётом парных билетов (парный = 2 человека). event_id=None — по
+    всем событиям. Только оплаченные билеты (возвращённые в счёт входа не идут).
+    """
+    where = "status = 'paid'"
+    params: list = []
+    if event_id is not None:
+        params.append(event_id)
+        where += f" AND event_id = ${len(params)}"
+    row = await pool.fetchrow(
+        f"""
+        SELECT
+          count(*) AS tickets_total,
+          count(*) FILTER (WHERE attended_at IS NOT NULL) AS tickets_in,
+          COALESCE(SUM({_PEOPLE_EXPR}), 0) AS people_total,
+          COALESCE(SUM({_PEOPLE_EXPR}) FILTER (WHERE attended_at IS NOT NULL), 0)
+            AS people_in
+        FROM tickets
+        WHERE {where}
+        """,
+        *params,
+    )
+    return dict(row)
 
 
 async def refunds_pending_notify(pool: asyncpg.Pool) -> list[asyncpg.Record]:

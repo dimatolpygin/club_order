@@ -32,6 +32,11 @@ def main() -> None:
     check("статус refund_requested", "refund_requested = true" in where, True)
     where, _ = repo._sold_tickets_filters(None, None, "refunded")
     check("статус refunded", "t.status = 'refunded'" in where, True)
+    # Чек-ин (этап 34): пришёл / не пришёл — только среди оплаченных.
+    where, _ = repo._sold_tickets_filters(None, None, "attended")
+    check("статус attended", "t.status = 'paid' AND t.attended_at IS NOT NULL" in where, True)
+    where, _ = repo._sold_tickets_filters(None, None, "not_attended")
+    check("статус not_attended", "t.status = 'paid' AND t.attended_at IS NULL" in where, True)
 
     # Поиск — по username/first_name/tg_id одним параметром (ILIKE).
     where, params = repo._sold_tickets_filters(None, "Gats", None)

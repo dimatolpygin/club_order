@@ -363,3 +363,54 @@ input[type="file"].input { height: auto; padding: 9px 12px; line-height: 1.4; }
 .msg-meta { font-size: 11px; color: var(--ink-soft); margin-top: 4px; }
 .thread-compose { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .pill-unread { color: #fff; background: var(--blue); font-weight: 700; }
+
+/* ── Чек-ин на точке (этап 34) ───────────────────────────────────────────── */
+/* Сводка прихода над таблицей. */
+.checkin-summary {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  margin: 0 0 16px; padding: 12px 16px;
+  background: #e9f7ee; border: 1px solid #bfe6cd; border-radius: 12px;
+}
+.checkin-title { font-weight: 700; color: #15803d; }
+.checkin-stat { font-size: 15px; color: var(--ink); }
+.checkin-stat b { color: #15803d; }
+/* Бейдж «пришёл ✓» и подсветка отмеченной строки. */
+.pill-attended { color: #fff; background: var(--green); font-weight: 700; }
+.table tr.row-attended td { background: #f3fbf6; }
+/* Кнопка отметки прихода — заметная зелёная, под палец на входе. */
+.btn-checkin { background: var(--green); color: #fff; border-color: var(--green); }
+.btn-checkin:hover { background: #15803d; }
+
+/* ── Адаптив таблиц под телефон (этап 34) ─────────────────────────────────── */
+/* На узком экране строки таблицы становятся карточками (без горизонтального
+   скролла): каждая ячейка — строка «подпись: значение» из data-label. */
+@media (max-width: 720px) {
+  .table-wrap { overflow: visible; }
+  .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+  .table thead { display: none; }
+  .table tr {
+    margin: 10px; padding: 6px 0; border: 1px solid var(--line);
+    border-radius: 12px; background: #fff;
+  }
+  .table tr:last-child td { border-bottom: 1px solid var(--line); }
+  .table td {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 12px; padding: 9px 14px; border-bottom: 1px solid #eef1f4;
+    white-space: normal; text-align: right;
+  }
+  .table td:last-child { border-bottom: none; }
+  .table td::before {
+    content: attr(data-label); font-weight: 600; color: var(--ink-soft);
+    font-size: 12px; text-transform: uppercase; letter-spacing: .3px;
+    text-align: left; flex: 0 0 auto;
+  }
+  /* Блок действий — кнопки в столбик во всю ширину, крупные под палец. */
+  .table td.actions { flex-direction: column; align-items: stretch; text-align: left; }
+  .table td.actions::before { margin-bottom: 4px; }
+  .table td.actions .btn, .table td.actions form { width: 100%; }
+  .table td.actions .btn { height: 46px; font-size: 15px; }
+  /* Фильтры на телефоне — каждый control во всю ширину. */
+  .filter-bar .input, .filter-bar > .btn, .filter-bar > a.btn { width: 100%; }
+  .filter-bar .date-range { width: 100%; }
+  .filter-bar .date-range .input { width: 100%; }
+}

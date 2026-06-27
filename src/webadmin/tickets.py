@@ -37,6 +37,8 @@ PAIR_TYPES = {"pair_mf", "pair_ff", "pair_mm"}
 STATUS_LABELS = {
     "": "Все статусы",
     "paid": "Оплачен",
+    "attended": "Пришёл",
+    "not_attended": "Не пришёл",
     "refund_requested": "Возврат запрошен",
     "refunded": "Возвращён",
 }
@@ -64,6 +66,11 @@ _FLASH = {
                             "убран из «Моих билетов». Реф-связь аннулирована (бонус не "
                             "начислится)."),
     "refund_err": ("error", "Билет #{rid} не найден или уже возвращён."),
+    "checkin_ok": ("ok", "Билет #{rid}: гость отмечен пришедшим."),
+    "checkin_already": ("ok", "Билет #{rid} уже был отмечен ранее — повторно не считаем."),
+    "checkin_err": ("error", "Билет #{rid} не найден (нужен оплаченный билет)."),
+    "uncheckin_ok": ("ok", "Билет #{rid}: отметка прихода снята."),
+    "uncheckin_err": ("error", "Билет #{rid} не был отмечен."),
 }
 
 
@@ -111,6 +118,8 @@ async def _render(request: Request, *, event_id: int | None, search: str = "",
             await repo.mark_inbound_read(pool, t["tg_id"])
             thread = await repo.manager_thread(pool, t["tg_id"])
     unread = await repo.unread_inbound_by_user(pool)
+    # Сводка чек-ина по выбранному событию (или по всем, если событие не выбрано).
+    checkin = await repo.checkin_stats(pool, event_id)
     return templates.TemplateResponse(
         request, "tickets.html",
         {
@@ -122,7 +131,8 @@ async def _render(request: Request, *, event_id: int | None, search: str = "",
             "date_to": date_to.isoformat() if date_to else "",
             "page": page, "pages": pages, "total": total, "per_page": PER_PAGE,
             "open_thread": open_thread, "thread": thread, "unread": unread,
-            "total_unread": sum(unread.values()),
+            "total_unread": sum(unread.values()), "checkin": checkin,
+            "pair_types": PAIR_TYPES,
             "error": error, "ok": ok,
         },
         status_code=status,
@@ -230,3 +240,28 @@ async def ticket_refund(request: Request, ticket_id: int, event_id: str = Form("
     )
     flash = "refunded_void" if res["referral_voided"] else "refunded"
     return _redirect(eid, flash, rid=ticket_id)
+
+
+@router.post("/tickets/{ticket_id}/checkin")
+async def ticket_checkin(request: Request, ticket_id: int, event_id: str = Form("")):
+    """Отметить приход гостя по билету на входе (этап 34). Идемпотентно (PRG)."""
+    admin = current_admin(request)
+    eid = int(event_id) if event_id and event_id.strip().isdigit() else None
+    pool = get_pool()
+    res = await repo.mark_ticket_attended(pool, ticket_id, admin["login"])
+    flash = {"ok": "checkin_ok", "already": "checkin_already"}.get(res, "checkin_err")
+    if res == "ok":
+        logger.info("Админка: чек-ин билета #{} ({})", ticket_id, admin["login"])
+    return _redirect(eid, flash, rid=ticket_id)
+
+
+@router.post("/tickets/{ticket_id}/uncheckin")
+async def ticket_uncheckin(request: Request, ticket_id: int, event_id: str = Form("")):
+    """Снять ошибочную отметку прихода (этап 34, PRG)."""
+    admin = current_admin(request)
+    eid = int(event_id) if event_id and event_id.strip().isdigit() else None
+    pool = get_pool()
+    ok = await repo.unmark_ticket_attended(pool, ticket_id)
+    if ok:
+        logger.info("Админка: снята отметка прихода билета #{} ({})", ticket_id, admin["login"])
+    return _redirect(eid, "uncheckin_ok" if ok else "uncheckin_err", rid=ticket_id)

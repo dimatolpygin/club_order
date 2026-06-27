@@ -44,6 +44,14 @@
 <p class="muted">Найдено: <b>{{ total }}</b>{% if total > per_page %} · страница {{ page }} из {{ pages }}{% endif %}.
   «Список на вход (CSV)» — оплаченные по текущим фильтрам, отсортированы по имени.</p>
 
+{# ── Сводка чек-ина по событию (этап 34) ───────────────────────────────────── #}
+<div class="checkin-summary">
+  <span class="checkin-title">Чек-ин{% if selected_event %} · по событию{% else %} · все события{% endif %}:</span>
+  <span class="checkin-stat">Пришло билетов <b>{{ checkin.tickets_in }}</b> из <b>{{ checkin.tickets_total }}</b></span>
+  <span class="checkin-stat">Людей <b>{{ checkin.people_in }}</b> из <b>{{ checkin.people_total }}</b></span>
+  <span class="muted">(парный билет = 2 человека)</span>
+</div>
+
 {# ── Переписка с покупателем (раскрыта по кнопке «Написать») ─────────────── #}
 {% if open_thread %}
   {% set ot = (tickets | selectattr('id', 'equalto', open_thread) | list | first) %}
@@ -96,14 +104,14 @@
     </thead>
     <tbody>
     {% for t in tickets %}
-      <tr class="{{ 'row-hidden' if t.status == 'refunded' else '' }}">
-        <td class="nowrap"><b>№{{ t.id }}</b></td>
-        <td class="nowrap">{{ t.created_at.strftime('%d.%m.%Y · %H:%M') }}</td>
-        <td>
+      <tr class="{{ 'row-hidden' if t.status == 'refunded' else '' }}{% if t.status == 'paid' and t.attended_at %} row-attended{% endif %}">
+        <td class="nowrap" data-label="№"><b>№{{ t.id }}</b></td>
+        <td class="nowrap" data-label="Куплен">{{ t.created_at.strftime('%d.%m.%Y · %H:%M') }}</td>
+        <td data-label="Событие">
           {{ kind_label.get(t.kind, t.kind) }} · {{ t.title }}
           <span class="muted">{{ t.starts_at.strftime('%d.%m.%Y') }}</span>
         </td>
-        <td>
+        <td data-label="Покупатель">
           {{ t.first_name or '—' }}
           {%- if t.username %} <span class="muted">@{{ t.username }}</span>{% endif %}
           <span class="muted">· id {{ t.tg_id }}</span>
@@ -111,9 +119,9 @@
             {% if t.username %}<a class="link-tg" href="https://t.me/{{ t.username }}" target="_blank" rel="noopener">t.me/{{ t.username }}</a>{% else %}<span class="muted">без username</span>{% endif %}
           </div>
         </td>
-        <td class="nowrap">{{ type_label.get(t.ticket_type, t.ticket_type) }}</td>
-        <td class="nowrap">{{ t.price|int }} ₽</td>
-        <td class="nowrap">
+        <td class="nowrap" data-label="Тип">{{ type_label.get(t.ticket_type, t.ticket_type) }}{% if t.ticket_type in pair_types %} <span class="muted">· 2 чел.</span>{% endif %}</td>
+        <td class="nowrap" data-label="Цена">{{ t.price|int }} ₽</td>
+        <td class="nowrap" data-label="Статус">
           {% if t.status == 'refunded' %}
             <span class="badge badge-danger">возвращён</span>
             <div class="muted">{{ t.refunded_at.strftime('%d.%m.%Y %H:%M') if t.refunded_at }}{% if t.refunded_by %} · {{ t.refunded_by }}{% endif %}</div>
@@ -130,8 +138,25 @@
           {% else %}
             <span class="badge badge-green">оплачен</span>
           {% endif %}
+          {% if t.status == 'paid' and t.attended_at %}
+            <span class="pill pill-attended">пришёл ✓</span>
+            <div class="muted">{{ t.attended_at.strftime('%d.%m.%Y %H:%M') }}{% if t.attended_by %} · {{ t.attended_by }}{% endif %}</div>
+          {% endif %}
         </td>
-        <td class="nowrap actions">
+        <td class="nowrap actions" data-label="Действия">
+          {% if t.status == 'paid' %}
+            {% if t.attended_at %}
+            <form method="post" action="/tickets/{{ t.id }}/uncheckin" class="inline">
+              <input type="hidden" name="event_id" value="{{ selected_event or '' }}">
+              <button type="submit" class="btn btn-sm btn-light">Отменить приход</button>
+            </form>
+            {% else %}
+            <form method="post" action="/tickets/{{ t.id }}/checkin" class="inline">
+              <input type="hidden" name="event_id" value="{{ selected_event or '' }}">
+              <button type="submit" class="btn btn-sm btn-checkin">Отметить пришёл</button>
+            </form>
+            {% endif %}
+          {% endif %}
           <a class="btn btn-sm {% if unread.get(t.tg_id) %}btn-primary{% else %}btn-light{% endif %}" href="/tickets?event_id={{ selected_event or '' }}&thread={{ t.id }}">Написать{% if unread.get(t.tg_id) %} · новый ответ ({{ unread.get(t.tg_id) }}){% endif %}</a>
           {% if t.status == 'paid' %}
           <form method="post" action="/tickets/{{ t.id }}/refund" class="inline"
