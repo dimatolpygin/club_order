@@ -23,6 +23,10 @@
             {% if s.menu %}<span class="badge badge-blue">+ кнопки</span>{% endif %}
             {% if s.photo_url %}<span class="badge badge-blue">+ фото</span>{% endif %}
             <div class="muted">{{ s.hint }}</div>
+            {% if s.photo_url %}
+              <img src="{{ s.photo_url }}" alt="Картинка экрана"
+                   style="height:48px;border-radius:6px;margin-top:8px;display:block;">
+            {% endif %}
           </td>
           <td><div class="tg-preview">{{ s.body | safe }}</div></td>
           <td class="nowrap"><a class="btn" href="/screens/{{ s.key }}">Редактировать</a></td>

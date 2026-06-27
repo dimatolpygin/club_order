@@ -44,6 +44,15 @@
       Необязательно. С картинкой экран показывается фото с подписью, поэтому текст
       ограничен <b>{{ caption_limit }}</b> символами. JPG или PNG.
     </p>
+    {% if screen.photo_url %}
+      <div style="margin-bottom:10px;">
+        <div class="muted" style="margin-bottom:4px;">Текущая картинка:</div>
+        <img src="{{ screen.photo_url }}" alt="Текущая картинка"
+             style="max-width:260px;border-radius:10px;display:block;">
+      </div>
+    {% else %}
+      <p class="muted">Картинка пока не задана.</p>
+    {% endif %}
     <div class="inline-form" style="align-items:center;gap:14px;flex-wrap:wrap;">
       {% if screen.photo_url %}
         <a href="{{ screen.photo_url }}" target="_blank" rel="noopener">Открыть текущую</a>
