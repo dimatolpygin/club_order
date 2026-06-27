@@ -39,9 +39,12 @@ def _put_sync(key: str, data: bytes, content_type: str) -> None:
     )
 
 
-async def upload_photo(data: bytes, ext: str = "jpg") -> str:
-    """Заливает фото в S3 и возвращает публичный URL. Бросает исключение при ошибке."""
-    key = f"broadcast/{uuid4().hex}.{ext}"
+async def upload_photo(data: bytes, ext: str = "jpg", *, prefix: str = "broadcast") -> str:
+    """Заливает фото в S3 и возвращает публичный URL. Бросает исключение при ошибке.
+
+    prefix — папка в бакете (рассылка → broadcast, картинки экранов → screens).
+    """
+    key = f"{prefix}/{uuid4().hex}.{ext}"
     content_type = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
     await asyncio.to_thread(_put_sync, key, data, content_type)
     base = (settings.s3_public_base_url or settings.s3_endpoint).rstrip("/")

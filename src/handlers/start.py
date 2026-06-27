@@ -55,9 +55,10 @@ async def cmd_start(
         await _try_bind_referral(pool, message, code)
     await repo.set_fsm_state(pool, u.id, "screen:start")
     subscribed = await repo.get_active_subscription(pool, u.id) is not None
-    await message.answer(
-        await screens.text(pool, "start"),
-        reply_markup=await menu.welcome_kb(pool, subscribed),
+    view = await screens.resolve(pool, "start")
+    await screens.render(
+        message, text=view["text"], markup=await menu.welcome_kb(pool, subscribed),
+        photo_url=view["photo_url"], edit=False,
     )
     logger.info(f"🤖 Бот → @{u.username or '—'}: приветствие /start")
 
@@ -79,8 +80,9 @@ async def cmd_menu(message: Message, pool: asyncpg.Pool, state: FSMContext) -> N
     await repo.upsert_user(pool, u.id, u.username, u.first_name)
     await repo.set_fsm_state(pool, u.id, "screen:menu")
     subscribed = await repo.get_active_subscription(pool, u.id) is not None
-    await message.answer(
-        await screens.text(pool, "menu"),
-        reply_markup=await menu.main_menu_kb(pool, subscribed),
+    view = await screens.resolve(pool, "menu")
+    await screens.render(
+        message, text=view["text"], markup=await menu.main_menu_kb(pool, subscribed),
+        photo_url=view["photo_url"], edit=False,
     )
     logger.info(f"🤖 Бот → @{u.username or '—'}: главное меню /menu")

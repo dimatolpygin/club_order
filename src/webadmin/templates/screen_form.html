@@ -4,6 +4,7 @@
 {% block content %}
 
 {% if ok %}<div class="alert alert-ok">Сохранено. Бот применит изменения сразу.</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
 
 <p class="muted">
   <a href="/screens">← Все экраны</a> · {{ screen.hint }}
@@ -11,22 +12,48 @@
   <code>&lt;u&gt;</code>, <code>&lt;s&gt;</code>, <code>&lt;a href="…"&gt;</code>, <code>&lt;code&gt;</code>.
 </p>
 
-<form method="post" action="/screens/{{ screen.key }}" class="card">
+<form method="post" action="/screens/{{ screen.key }}" class="card" enctype="multipart/form-data">
   <div class="screen-grid">
     <div>
       <label class="price-label">Текст экрана</label>
-      <textarea name="body" class="input textarea w-full" rows="16"
+      <textarea name="body" id="screen-body" class="input textarea w-full" rows="16"
                 placeholder="Текст экрана">{{ screen.body }}</textarea>
-      <p class="muted">Пусто или текст по умолчанию → вернётся стандартный текст.</p>
+      <p class="muted">
+        Пусто или текст по умолчанию → вернётся стандартный текст.
+        <span id="char-counter"></span>
+      </p>
     </div>
     <div>
       <label class="price-label">Предпросмотр (как увидит пользователь)</label>
+      {% if screen.photo_url %}
+        <img src="{{ screen.photo_url }}" alt="Картинка экрана"
+             style="max-width:100%;border-radius:10px;margin-bottom:10px;display:block;">
+      {% endif %}
       <div class="tg-preview">{{ screen.body | safe }}</div>
       {% if screen.custom %}
         <p class="muted">Сейчас задан свой текст. Очистите поле и сохраните, чтобы вернуть стандартный.</p>
       {% endif %}
     </div>
   </div>
+
+  <h3 class="section-title">Картинка экрана</h3>
+  {% if not s3_enabled %}
+    <p class="muted">Хранилище S3 не настроено — загрузка картинок недоступна.</p>
+  {% else %}
+    <p class="muted">
+      Необязательно. С картинкой экран показывается фото с подписью, поэтому текст
+      ограничен <b>{{ caption_limit }}</b> символами. JPG или PNG.
+    </p>
+    <div class="inline-form" style="align-items:center;gap:14px;flex-wrap:wrap;">
+      {% if screen.photo_url %}
+        <a href="{{ screen.photo_url }}" target="_blank" rel="noopener">Открыть текущую</a>
+        <label class="switch">
+          <input type="checkbox" name="remove_photo"><span>убрать картинку</span>
+        </label>
+      {% endif %}
+      <input type="file" name="photo" accept="image/png,image/jpeg">
+    </div>
+  {% endif %}
 
   {% if buttons %}
   <h3 class="section-title">Кнопки этого экрана</h3>
@@ -63,5 +90,21 @@
 
   <div class="form-actions"><button type="submit" class="btn btn-primary">Сохранить</button></div>
 </form>
+
+<script>
+  (function () {
+    var limit = {{ caption_limit }};
+    var body = document.getElementById("screen-body");
+    var counter = document.getElementById("char-counter");
+    if (!body || !counter) return;
+    function update() {
+      var n = body.value.length;
+      counter.textContent = "Символов: " + n + " (с картинкой — не более " + limit + ").";
+      counter.style.color = n > limit ? "#991b1b" : "";
+    }
+    body.addEventListener("input", update);
+    update();
+  })();
+</script>
 
 {% endblock %}

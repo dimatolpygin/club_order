@@ -21,6 +21,7 @@
             <b>{{ s.title }}</b>
             {% if s.custom %}<span class="badge badge-blue">изменён</span>{% endif %}
             {% if s.menu %}<span class="badge badge-blue">+ кнопки</span>{% endif %}
+            {% if s.photo_url %}<span class="badge badge-blue">+ фото</span>{% endif %}
             <div class="muted">{{ s.hint }}</div>
           </td>
           <td><div class="tg-preview">{{ s.body | safe }}</div></td>

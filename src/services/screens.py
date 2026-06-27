@@ -17,9 +17,17 @@
 """
 from __future__ import annotations
 
+from contextlib import suppress
+
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import InlineKeyboardMarkup, InputMediaPhoto, Message
 import asyncpg
 
 from .. import repo, texts
+
+# Лимит подписи под фото в Telegram. Экран с картинкой показывается ОДНИМ
+# сообщением (фото + подпись), поэтому его текст не может быть длиннее.
+CAPTION_LIMIT = 1024
 
 # Реестр: ключ → метаданные экрана. Порядок определяет порядок в админке.
 #   title   — человекочитаемое имя экрана в админке;
@@ -82,26 +90,98 @@ async def text(pool: asyncpg.Pool, key: str) -> str:
 
     Неизвестный ключ → дефолт недоступен, поднимаем KeyError (ошибка в коде).
     """
-    overrides = await repo.get_screen_overrides(pool)
-    return overrides.get(key) or SCREEN_DEFS[key]["default"]
+    ov = (await repo.get_screen_overrides(pool)).get(key) or {}
+    return ov.get("body") or SCREEN_DEFS[key]["default"]
+
+
+async def resolve(pool: asyncpg.Pool, key: str) -> dict:
+    """Что показать на экране: {"text": ..., "photo_url": str|None}.
+
+    Единая точка резолва для бота: текст (переопределение или дефолт) + картинка
+    (None = без фото). Используется хендлерами вместе с render().
+    """
+    ov = (await repo.get_screen_overrides(pool)).get(key) or {}
+    return {
+        "text": ov.get("body") or SCREEN_DEFS[key]["default"],
+        "photo_url": ov.get("photo_url"),
+    }
 
 
 async def screen_list(pool: asyncpg.Pool) -> list[dict]:
-    """Список экранов для админки (в порядке реестра): ключ, имя, текущий текст, кастом."""
+    """Список экранов для админки (в порядке реестра): ключ, имя, текст, фото, кастом."""
     overrides = await repo.get_screen_overrides(pool)
     result: list[dict] = []
     for key, meta in SCREEN_DEFS.items():
-        custom = key in overrides
+        ov = overrides.get(key) or {}
         result.append({
             "key": key,
             "title": meta["title"],
             "hint": meta["hint"],
             "menu": meta["menu"],
-            "body": overrides.get(key) or meta["default"],
+            "body": ov.get("body") or meta["default"],
             "default_body": meta["default"],
-            "custom": custom,
+            "custom": bool(ov.get("body")),
+            "photo_url": ov.get("photo_url"),
         })
     return result
+
+
+async def render(
+    message: Message,
+    *,
+    text: str,
+    markup: InlineKeyboardMarkup,
+    photo_url: str | None,
+    edit: bool,
+) -> None:
+    """Безопасный показ инфо-экрана (с фото или без), не ломающий навигацию.
+
+    Telegram не умеет edit_text по сообщению-фото и не превращает текст в фото через
+    edit, поэтому переход между экраном-с-фото и экраном-без-фото нельзя делать наивно.
+    Единое правило для ВСЕХ точек показа (навигация по кнопкам и /start, /menu):
+
+    - edit=False (/start, /menu — новое сообщение): answer_photo если фото, иначе answer.
+    - edit=True (переход по кнопке — заменяем текущее сообщение):
+      * цель без фото, текущее текстовое → edit_text (как раньше, плавно, без регресса);
+      * цель без фото, текущее фото       → delete + send_message;
+      * цель с фото,  текущее фото        → edit_media (на ошибку → delete + send_photo);
+      * цель с фото,  текущее текстовое   → delete + send_photo.
+
+    Все delete/edit под suppress: устаревшее/удалённое сообщение не валит флоу.
+    """
+    if not edit:
+        if photo_url:
+            await message.answer_photo(photo_url, caption=text, reply_markup=markup)
+        else:
+            await message.answer(text, reply_markup=markup)
+        return
+
+    current_is_photo = bool(message.photo)
+
+    if not photo_url:
+        if current_is_photo:
+            with suppress(TelegramBadRequest):
+                await message.delete()
+            await message.answer(text, reply_markup=markup)
+        else:
+            with suppress(TelegramBadRequest):  # «message is not modified» — не критично
+                await message.edit_text(text, reply_markup=markup)
+        return
+
+    # Целевой экран с фото.
+    if current_is_photo:
+        try:
+            await message.edit_media(
+                InputMediaPhoto(media=photo_url, caption=text), reply_markup=markup,
+            )
+        except TelegramBadRequest:  # not modified / иная ошибка edit — пересоздаём
+            with suppress(TelegramBadRequest):
+                await message.delete()
+            await message.answer_photo(photo_url, caption=text, reply_markup=markup)
+    else:
+        with suppress(TelegramBadRequest):
+            await message.delete()
+        await message.answer_photo(photo_url, caption=text, reply_markup=markup)
 
 
 async def screen_one(pool: asyncpg.Pool, key: str) -> dict | None:

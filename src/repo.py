@@ -1596,18 +1596,22 @@ async def upsert_menu_button(
 
 
 # ── Тексты экранов бота (screen_texts, этап 22) ───────────────────────────────
-async def get_screen_overrides(pool: asyncpg.Pool) -> dict[str, str]:
-    """Переопределения текстов экранов из БД: {key: body}.
+async def get_screen_overrides(pool: asyncpg.Pool) -> dict[str, dict]:
+    """Переопределения экранов из БД: {key: {"body": str|None, "photo_url": str|None}}.
 
-    Дефолтные тексты — в реестре services.screens; здесь только то, что админ
-    изменил. Пустые переопределения (body=NULL) не возвращаем — бот возьмёт дефолт.
+    Дефолтные тексты — в реестре services.screens; здесь только переопределения.
+    Возвращаем ВСЕ строки (фото может быть задано при дефолтном тексте, тогда body=NULL),
+    резолв «что показать» — на стороне services.screens.
     """
-    rows = await pool.fetch("SELECT key, body FROM screen_texts WHERE body IS NOT NULL")
-    return {r["key"]: r["body"] for r in rows}
+    rows = await pool.fetch("SELECT key, body, photo_url FROM screen_texts")
+    return {r["key"]: {"body": r["body"], "photo_url": r["photo_url"]} for r in rows}
 
 
 async def upsert_screen_text(pool: asyncpg.Pool, key: str, body: str | None) -> None:
-    """Сохраняет переопределение текста экрана (body=None → дефолт из реестра)."""
+    """Сохраняет переопределение текста экрана (body=None → дефолт из реестра).
+
+    Картинку (photo_url) не трогаем — правки текста и фото независимы.
+    """
     await pool.execute(
         """
         INSERT INTO screen_texts(key, body, updated_at)
@@ -1617,6 +1621,23 @@ async def upsert_screen_text(pool: asyncpg.Pool, key: str, body: str | None) -> 
         """,
         key,
         body,
+    )
+
+
+async def upsert_screen_photo(pool: asyncpg.Pool, key: str, photo_url: str | None) -> None:
+    """Сохраняет/снимает картинку экрана (photo_url=None → без фото).
+
+    Текст (body) не трогаем — правки текста и фото независимы.
+    """
+    await pool.execute(
+        """
+        INSERT INTO screen_texts(key, photo_url, updated_at)
+        VALUES($1, $2, now())
+        ON CONFLICT (key) DO UPDATE
+            SET photo_url = EXCLUDED.photo_url, updated_at = now()
+        """,
+        key,
+        photo_url,
     )
 
 
