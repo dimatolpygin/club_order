@@ -232,6 +232,13 @@ html, body {
 /* Инлайн-форма продления в строке таблицы (этап 19). */
 .inline-form { display: inline-flex; align-items: center; gap: 6px; }
 .inline-form .num-sm { width: 64px; }
+/* Результаты поиска участника (Подписки): крупные тап-цели, мобильно. */
+.search-results { margin-top: 12px; }
+.result-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.result-list li { margin-bottom: 8px; }
+.result-item { display: block; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 10px; text-decoration: none; color: var(--ink); }
+.result-item:hover { background: #f5f7fa; }
 /* Раздел «Кнопки меню» (этап 19). */
 .w-full { width: 100%; }
 .form-actions { margin-top: 14px; }

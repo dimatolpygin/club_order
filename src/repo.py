@@ -34,6 +34,27 @@ async def get_user(pool: asyncpg.Pool, tg_id: int) -> asyncpg.Record | None:
     return await pool.fetchrow("SELECT * FROM users WHERE tg_id = $1", tg_id)
 
 
+async def search_users(
+    pool: asyncpg.Pool, query: str, limit: int = 25
+) -> list[asyncpg.Record]:
+    """Поиск участников по @username / имени / tg_id (частично, регистронезависимо).
+
+    Для раздела «Подписки»: админ ищет человека не только по числовому ID, но и по
+    нику/имени. Возвращает tg_id, username, first_name отсортированными по нику/имени.
+    """
+    like = f"%{query}%"
+    return await pool.fetch(
+        """
+        SELECT tg_id, username, first_name
+        FROM users
+        WHERE username ILIKE $1 OR first_name ILIKE $1 OR CAST(tg_id AS TEXT) LIKE $1
+        ORDER BY username NULLS LAST, first_name NULLS LAST, tg_id
+        LIMIT $2
+        """,
+        like, limit,
+    )
+
+
 async def get_all_user_ids(pool: asyncpg.Pool) -> list[int]:
     """Все tg_id для рассылки (кроме заблокированных)."""
     rows = await pool.fetch(

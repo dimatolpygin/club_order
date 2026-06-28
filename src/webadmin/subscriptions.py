@@ -36,6 +36,7 @@ _SOURCE_LABELS = {"payment": "оплата", "manual": "вручную", "promo"
 
 
 async def _render(request: Request, *, error: str | None = None, ok: str | None = None,
+                  results: list | None = None, results_query: str | None = None,
                   status: int = 200):
     pool = get_pool()
     rows = await repo.list_active_subscriptions(pool)
@@ -59,6 +60,7 @@ async def _render(request: Request, *, error: str | None = None, ok: str | None 
             "active": "subscriptions", "admin": request.session.get("admin"),
             "subs": subs, "unit_labels": UNIT_LABELS,
             "error": error, "ok": ok,
+            "results": results, "results_query": results_query,
         },
         status_code=status,
     )
@@ -176,13 +178,31 @@ async def _member_card(request: Request, tg_id: int, *, ok: str | None = None,
 
 
 @router.get("/subscriptions/find")
-async def member_find(request: Request, tg_id: str = ""):
+async def member_find(request: Request, q: str = "", tg_id: str = ""):
     current_admin(request)
-    raw = (tg_id or "").strip()
-    if not raw.lstrip("-").isdigit():
-        return await _render(request, error="Введите числовой Telegram ID участника.",
+    # tg_id — для совместимости со старыми ссылками; основной параметр теперь q.
+    raw = (q or tg_id or "").strip()
+    if not raw:
+        return await _render(request, error="Введите Telegram ID, @username или имя.",
                              status=400)
-    return RedirectResponse(f"/subscriptions/member/{int(raw)}", status_code=303)
+    # Чистый числовой ID (можно с минусом) → сразу карточка.
+    if raw.lstrip("-").isdigit():
+        return RedirectResponse(f"/subscriptions/member/{int(raw)}", status_code=303)
+    # Иначе ищем по нику/имени (частично). Лидирующий @ убираем.
+    pool = get_pool()
+    found = await repo.search_users(pool, raw.lstrip("@"))
+    if not found:
+        return await _render(request, error=f"Никого не найдено по запросу «{raw}».",
+                             status=404)
+    if len(found) == 1:
+        return RedirectResponse(
+            f"/subscriptions/member/{found[0]['tg_id']}", status_code=303
+        )
+    results = [
+        {"tg_id": u["tg_id"], "username": u["username"], "first_name": u["first_name"]}
+        for u in found
+    ]
+    return await _render(request, results=results, results_query=raw)
 
 
 @router.get("/subscriptions/member/{tg_id}")

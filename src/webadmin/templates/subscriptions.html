@@ -9,10 +9,28 @@
 <h2 class="section-title">Участник</h2>
 <div class="card">
   <form method="get" action="/subscriptions/find" class="inline-form">
-    <span class="field-label">Найти по ID:</span>
-    <input type="text" name="tg_id" placeholder="Telegram ID" class="input" style="min-width:220px" required>
-    <button type="submit" class="btn btn-primary">Открыть карточку</button>
+    <span class="field-label">Найти участника:</span>
+    <input type="text" name="q" placeholder="Telegram ID, @username или имя"
+           value="{{ results_query or '' }}" class="input" style="min-width:260px" required>
+    <button type="submit" class="btn btn-primary">Найти</button>
   </form>
+
+  {% if results %}
+  <div class="search-results">
+    <p class="muted">Найдено по запросу «{{ results_query }}»: {{ results|length }}. Выберите участника:</p>
+    <ul class="result-list">
+      {% for r in results %}
+      <li>
+        <a class="result-item" href="/subscriptions/member/{{ r.tg_id }}">
+          <b>{{ r.first_name or '—' }}</b>
+          {%- if r.username %} <span class="muted">@{{ r.username }}</span>{% endif %}
+          <span class="muted">· id {{ r.tg_id }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
   <form method="post" action="/subscriptions/member/add" class="inline-form">
     <span class="field-label">Выдать вручную:</span>
     <input type="text" name="tg_id" placeholder="Telegram ID" class="input" style="min-width:160px" required>
