@@ -82,16 +82,16 @@ def main() -> None:
     check("показ: только прошедшие → пусто",
           ev.visible_events([past_retreat, banya_past], NOW), [])
 
-    # ── Скрытие распроданных + промотирование следующей бани ──────────────────
-    # banya_near (5) распродан → ближайшей баней должна стать banya_next (6).
-    visible_sold = ev.visible_events(rows, NOW, sold_out_ids={5})
-    banya_visible = [r["id"] for r in visible_sold if r["kind"] == ev.KIND_BANYA]
-    check("распродан ближайший: показывается следующая баня (6) + заранее (7)",
-          sorted(banya_visible), [6, 7])
-    check("распродан ближайший: сам распроданный (5) скрыт",
-          5 in [r["id"] for r in visible_sold], False)
+    # ── Распроданность НЕ влияет на видимость (этап 38) ───────────────────────
+    # Распроданная ближайшая баня остаётся в списке (с пометкой «Мест нет» её
+    # вешает хендлер), состав от sold-out не зависит — visible_events про него не знает.
+    visible_again = ev.visible_events(rows, NOW)
+    check("этап 38: распроданность не меняет состав (5 остаётся ближайшей баней)",
+          ids(visible_again), [5, 2, 3, 7])
+    check("этап 38: ближайшая баня (5) видна даже при исчерпании мест",
+          5 in ids(visible_again), True)
 
-    # event_available: общий пул распродан → событие недоступно (скрываем).
+    # event_available: общий пул распродан → событие недоступно (в списке — «Мест нет»).
     full_pool = make_event(gender_balance=False, seats_total=1)
     occ_full = ev.seats_occupied({"female": 1})  # total=1 из 1
     check("event_available: общий пул распродан → False",

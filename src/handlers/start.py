@@ -75,14 +75,16 @@ async def cmd_id(message: Message) -> None:
 
 @router.message(Command("menu"))
 async def cmd_menu(message: Message, pool: asyncpg.Pool, state: FSMContext) -> None:
+    # Отдельный экран «Главное меню» убран как дубль приветствия (этап 38):
+    # /menu — синоним /start, показывает стартовый экран.
     await state.clear()
     u = message.from_user
     await repo.upsert_user(pool, u.id, u.username, u.first_name)
-    await repo.set_fsm_state(pool, u.id, "screen:menu")
+    await repo.set_fsm_state(pool, u.id, "screen:start")
     subscribed = await repo.get_active_subscription(pool, u.id) is not None
-    view = await screens.resolve(pool, "menu")
+    view = await screens.resolve(pool, "start")
     await screens.render(
-        message, text=view["text"], markup=await menu.main_menu_kb(pool, subscribed),
+        message, text=view["text"], markup=await menu.welcome_kb(pool, subscribed),
         photo_url=view["photo_url"], edit=False,
     )
-    logger.info(f"🤖 Бот → @{u.username or '—'}: главное меню /menu")
+    logger.info(f"🤖 Бот → @{u.username or '—'}: главное меню /menu (стартовый экран)")

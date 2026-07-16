@@ -82,7 +82,7 @@ async def _applied_keyboard(
             callback_data=f"promo:buy:{promo['id']}:{d['id']}",
         ))
     b.row(InlineKeyboardButton(text="Выбрать обычный тариф", callback_data=kb.NAV_TARIFF))
-    b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_MENU))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_START))
     return b.as_markup(), tier
 
 

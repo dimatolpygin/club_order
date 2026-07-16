@@ -68,9 +68,12 @@ async def nav_rules(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
 @router.callback_query(F.data == kb.NAV_MENU)
 async def nav_menu(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    # Раздел «Главное меню» убран как дубль приветствия (этап 38): и NAV_MENU, и
+    # NAV_START ведут на один стартовый экран. Обработчик оставлен для старых
+    # сообщений с кнопкой NAV_MENU в истории чатов.
     await state.clear()
     subscribed = await repo.get_active_subscription(pool, cb.from_user.id) is not None
-    await _show(cb, pool, "menu", "menu", await menu.main_menu_kb(pool, subscribed))
+    await _show(cb, pool, "start", "start", await menu.welcome_kb(pool, subscribed))
 
 
 @router.callback_query(F.data == kb.NAV_SUPPORT)

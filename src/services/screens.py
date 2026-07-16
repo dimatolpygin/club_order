@@ -39,13 +39,7 @@ SCREEN_DEFS: dict[str, dict] = {
         "title": "Приветствие (/start)",
         "default": texts.WELCOME,
         "menu": "welcome",
-        "hint": "Первый экран при входе в бота.",
-    },
-    "menu": {
-        "title": "Главное меню (/menu)",
-        "default": texts.MAIN_MENU,
-        "menu": "main",
-        "hint": "Главное меню бота.",
+        "hint": "Первый экран при входе в бота (он же /menu — отдельного меню нет).",
     },
     "aboutmenu": {
         "title": "Подменю «О клубе»",

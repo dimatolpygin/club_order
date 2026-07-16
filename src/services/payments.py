@@ -325,7 +325,7 @@ def success_kb() -> InlineKeyboardBuilder:
     b = InlineKeyboardBuilder()
     add_chat_button(b)
     b.row(InlineKeyboardButton(text="Моя подписка", callback_data=kb.NAV_MYSUB))
-    b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_START))
     return b
 
 

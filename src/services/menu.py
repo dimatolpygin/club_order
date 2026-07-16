@@ -89,12 +89,11 @@ def _build(layout: list[list[str]], config: dict[str, dict]) -> InlineKeyboardMa
 
 
 async def welcome_kb(pool: asyncpg.Pool, subscribed: bool) -> InlineKeyboardMarkup:
-    """Клавиатура приветствия (/start): контекстна по статусу подписки (этап 31)."""
-    return _build(_top_layout(subscribed), await resolve_config(pool))
+    """Клавиатура стартового экрана (/start и /menu): контекстна по статусу (этап 31).
 
-
-async def main_menu_kb(pool: asyncpg.Pool, subscribed: bool) -> InlineKeyboardMarkup:
-    """Клавиатура главного меню (/menu): контекстна по статусу подписки (этап 31)."""
+    Отдельного экрана «Главное меню» больше нет (этап 38) — /menu и кнопки
+    «В главное меню» ведут на этот же стартовый экран.
+    """
     return _build(_top_layout(subscribed), await resolve_config(pool))
 
 
@@ -110,7 +109,7 @@ async def aboutmenu_kb(pool: asyncpg.Pool) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=config[k]["label"], callback_data=BUTTON_DEFS[k][1])
             for k in visible
         ])
-    b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_MENU))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_START))
     return b.as_markup()
 
 
@@ -128,7 +127,6 @@ _TOP_UNION: list[list[str]] = [
 ]
 LAYOUTS: dict[str, list[list[str]]] = {
     "welcome": _TOP_UNION,
-    "main": _TOP_UNION,
     "aboutmenu": ABOUTMENU_LAYOUT,
 }
 

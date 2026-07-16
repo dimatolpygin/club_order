@@ -42,9 +42,10 @@ TPROMO = "tpromo"            # tpromo:{event_id}:{ticket_type} — ввести 
 # Оплата бонусами на билете (этап 17).
 TBONUS = "tbonus"            # tbonus:{event_id}:{ticket_type}:{promo_or_0}:{1|0} — тоггл бонусов
 
-# Клавиатуры приветствия (welcome_kb) и главного меню (main_menu_kb) переехали в
-# services.menu — они стали DB-управляемыми (переименование/скрытие кнопок из
-# веб-админки, этап 19). Здесь остаются вторичные экраны и константы NAV_*.
+# Клавиатура стартового экрана (welcome_kb) переехала в services.menu — она стала
+# DB-управляемой (переименование/скрытие кнопок из веб-админки, этап 19). Отдельного
+# «Главного меню» больше нет (этап 38): NAV_MENU оставлен алиасом NAV_START для
+# старых сообщений, новые кнопки ведут на NAV_START. Здесь — вторичные экраны и NAV_*.
 
 
 def about_kb() -> InlineKeyboardMarkup:
@@ -82,7 +83,7 @@ def referral_link_kb(share_url: str) -> InlineKeyboardMarkup:
         text="Поделиться приглашением",
         switch_inline_query=f" {share_url}",
     ))
-    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
     return b.as_markup()
 
 
@@ -122,7 +123,7 @@ def reminder_last_kb() -> InlineKeyboardMarkup:
 def promo_enter_kb() -> InlineKeyboardMarkup:
     """Экран ввода промокода (18): только «Назад» в меню."""
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_MENU))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_START))
     return b.as_markup()
 
 
@@ -146,27 +147,31 @@ def promo_failed_kb() -> InlineKeyboardMarkup:
 def to_menu_kb() -> InlineKeyboardMarkup:
     """Кнопка в главное меню (для заглушек и подтверждений)."""
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
     return b.as_markup()
 
 
 # ── Мероприятия (этап 13) ────────────────────────────────────────────────────
-def events_list_kb(groups: list) -> InlineKeyboardMarkup:
+def events_list_kb(groups: list, sold_out_ids: set | None = None) -> InlineKeyboardMarkup:
     """Список событий: кнопка на событие с подписью типа (Тип · Название · дата).
 
     `groups` — `(kind_short, [event_record])` в порядке показа. Тип в подписи,
-    чтобы в списке было видно, где баня, а где ретрит. + «Назад» в меню.
+    чтобы в списке было видно, где баня, а где ретрит. Распроданные события
+    (`sold_out_ids`, этап 38) остаются в списке с пометкой «· мест нет».
+    + «Назад» в меню.
     """
+    sold_out = sold_out_ids or set()
     b = InlineKeyboardBuilder()
     for kind_short, events in groups:
         for e in events:
+            suffix = " · мест нет" if e["id"] in sold_out else ""
             b.row(
                 InlineKeyboardButton(
-                    text=f"{kind_short} · {e['title']} · {e['starts_at']:%d.%m}",
+                    text=f"{kind_short} · {e['title']} · {e['starts_at']:%d.%m}{suffix}",
                     callback_data=f"{EVT_OPEN}:{e['id']}",
                 )
             )
-    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_MENU))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_START))
     return b.as_markup()
 
 
@@ -265,7 +270,7 @@ def ticket_promo_retry_kb(event_id: int, ticket_type: str) -> InlineKeyboardMark
     b.row(InlineKeyboardButton(
         text="Продолжить без промокода", callback_data=f"{EVT_BUY}:{event_id}:{ticket_type}"
     ))
-    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
     return b.as_markup()
 
 
@@ -287,7 +292,7 @@ def ticket_canceled_kb(event_id: int) -> InlineKeyboardMarkup:
     """После отмены платежа: вернуться к билетам события + в меню."""
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Вернуться к билетам", callback_data=f"{EVT_OPEN}:{event_id}"))
-    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
     return b.as_markup()
 
 
@@ -306,7 +311,7 @@ def ticket_address_kb() -> InlineKeyboardMarkup:
     """После показа адреса: к списку мероприятий + в главное меню."""
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="К мероприятиям", callback_data=NAV_EVENTS))
-    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
     return b.as_markup()
 
 
@@ -327,21 +332,20 @@ def my_tickets_kb(tickets: list) -> InlineKeyboardMarkup:
                 callback_data=f"{MYT_OPEN}:{t['id']}",
             )
         )
-    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_MENU))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
     return b.as_markup()
 
 
 def ticket_detail_kb(ticket_id: int, refund_requested: bool = False) -> InlineKeyboardMarkup:
-    """Карточка билета: запрос возврата · назад. Адрес/правила уже на экране.
+    """Карточка билета: поддержка · назад. Адрес/правила уже на экране.
 
-    Если возврат уже запрошен — кнопку запроса убираем (нельзя слать повторно).
-    Кнопки «Перенос» нет (решение заказчика).
+    Кнопки «Запросить возврат» больше нет (этап 38) — возвраты только через
+    менеджера, поэтому вместо неё «Поддержка». Кнопки «Перенос» тоже нет.
+    `refund_requested` больше не влияет на раскладку (оставлен для совместимости
+    вызова).
     """
     b = InlineKeyboardBuilder()
-    if not refund_requested:
-        b.row(InlineKeyboardButton(
-            text="Запросить возврат", callback_data=f"{MYT_REFUND}:{ticket_id}"
-        ))
+    b.row(InlineKeyboardButton(text="Поддержка", callback_data=NAV_SUPPORT))
     b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_MYTICKETS))
     return b.as_markup()
 

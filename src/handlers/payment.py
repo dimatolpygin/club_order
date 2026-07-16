@@ -133,7 +133,7 @@ def _renew_kb(durations, monthly) -> InlineKeyboardMarkup:
             callback_data=f"renew:{d['id']}",
         ))
     b.row(InlineKeyboardButton(text="Моя подписка", callback_data=kb.NAV_MYSUB))
-    b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_START))
     return b.as_markup()
 
 
@@ -200,14 +200,14 @@ async def _my_subscription_view(
         b = InlineKeyboardBuilder()
         b.row(InlineKeyboardButton(text="Оформить подписку", callback_data=kb.NAV_TARIFF))
         b.row(InlineKeyboardButton(text="Ввести промокод", callback_data=kb.NAV_PROMO))
-        b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
+        b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_START))
         return texts.MY_SUB_NONE, b.as_markup(), False
 
     b = InlineKeyboardBuilder()
     payments.add_chat_button(b)
     b.row(InlineKeyboardButton(text="Продлить подписку", callback_data=kb.NAV_RENEW))
     b.row(InlineKeyboardButton(text="Правила клуба", callback_data=kb.NAV_RULES))
-    b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_MENU))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=kb.NAV_START))
     text = texts.my_sub_active(
         fmt_price(sub["fixed_price"]),
         sub["start_date"],
