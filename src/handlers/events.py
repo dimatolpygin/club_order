@@ -112,16 +112,25 @@ async def _ticket_summary_view(
 
 
 # ── Список мероприятий ───────────────────────────────────────────────────────
-@router.callback_query(F.data == kb.NAV_EVENTS)
-async def show_events(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+async def _render_events_list(
+    cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext, kind: str | None
+) -> None:
+    """Показ списка мероприятий, опц. отфильтрованный по виду (этап 39).
+
+    `kind=None` — все виды (общий вход, совместимость со старыми кнопками);
+    `kind='banya'`/`'retreat'` — раздельные входы «Бани»/«Ретриты» главного меню.
+    """
     await state.clear()
-    await repo.set_fsm_state(pool, cb.from_user.id, "screen:events")
+    screen = "events" if kind is None else f"events:{kind}"
+    await repo.set_fsm_state(pool, cb.from_user.id, f"screen:{screen}")
 
     rows = await repo.list_events(pool)
     visible = ev.visible_events(rows, datetime.now(timezone.utc))
+    if kind is not None:
+        visible = [e for e in visible if e["kind"] == kind]
     if not visible:
         await _edit(cb, texts.EVENTS_NONE, kb.to_menu_kb())
-        logger.info(f"🤖 Бот → @{cb.from_user.username or '—'}: мероприятия (пусто)")
+        logger.info(f"🤖 Бот → @{cb.from_user.username or '—'}: мероприятия (пусто, {kind or 'все'})")
         return
 
     # Распроданные события НЕ скрываем (этап 38) — помечаем «Мест нет» в списке,
@@ -141,9 +150,24 @@ async def show_events(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) 
     )
     await _edit(cb, text, markup)
     logger.info(
-        f"🤖 Бот → @{cb.from_user.username or '—'}: мероприятия — {len(visible)} событ. "
-        f"({len(grouped)} групп)"
+        f"🤖 Бот → @{cb.from_user.username or '—'}: мероприятия ({kind or 'все'}) — "
+        f"{len(visible)} событ. ({len(grouped)} групп)"
     )
+
+
+@router.callback_query(F.data == kb.NAV_EVENTS)
+async def show_events(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await _render_events_list(cb, pool, state, None)
+
+
+@router.callback_query(F.data == kb.NAV_BANYA)
+async def show_banyas(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await _render_events_list(cb, pool, state, ev.KIND_BANYA)
+
+
+@router.callback_query(F.data == kb.NAV_RETREAT)
+async def show_retreats(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    await _render_events_list(cb, pool, state, ev.KIND_RETREAT)
 
 
 # ── Карточка события: меню типов билетов ─────────────────────────────────────
@@ -156,6 +180,7 @@ async def show_event(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
 
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:event:{event_id}")
+    back_cb = kb.events_nav_for_kind(event["kind"])
     prices = await repo.get_event_prices(pool, event_id)
     counts = await repo.get_event_ticket_counts(pool, event_id)
     items = ev.seat_availability(event, prices, ev.seats_occupied(counts))
@@ -163,7 +188,7 @@ async def show_event(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     # Ни одного типа со свободными местами (или вовсе без цен) → «Мест нет».
     if not any(available for _, _, available in items):
         url = await app_settings.support_url(pool)
-        await _edit(cb, texts.EVENT_SOLD_OUT, kb.event_sold_out_kb(url or None))
+        await _edit(cb, texts.EVENT_SOLD_OUT, kb.event_sold_out_kb(url or None, back_cb))
         logger.info(
             f"🤖 Бот → @{cb.from_user.username or '—'}: событие «{event['title']}» — мест нет"
         )
@@ -189,7 +214,7 @@ async def show_event(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
         ev.kind_label(event["kind"]), event["title"], event["starts_at"],
         discount_pct, price_lines,
     )
-    await _edit(cb, text, kb.event_tickets_kb(event_id, display_items))
+    await _edit(cb, text, kb.event_tickets_kb(event_id, display_items, back_cb))
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: событие «{event['title']}», "
         f"{len(items)} тип(ов) билетов, скидка участника {discount_pct}%"
@@ -474,7 +499,10 @@ async def ticket_show_address(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await repo.set_ticket_rules_agreed(pool, ticket_id)
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:ticket:address:{ticket_id}")
-    await _edit(cb, texts.ticket_address(event["title"], event["address"]), kb.ticket_address_kb())
+    await _edit(
+        cb, texts.ticket_address(event["title"], event["address"]),
+        kb.ticket_address_kb(kb.events_nav_for_kind(event["kind"])),
+    )
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: согласие с правилами, "
         f"показан адрес (билет #{ticket_id})"

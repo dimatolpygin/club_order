@@ -1,7 +1,8 @@
-"""Изолированный smoke-тест контекстных раскладок меню (этап 31).
+"""Изолированный smoke-тест раскладок нового главного меню (этап 39).
 
-Проверяет services.menu без БД: какие кнопки на верхнем уровне у гостя и подписчика,
-состав подменю «О клубе», отсутствие промокода на верхнем уровне, компактность и
+Проверяет services.menu без БД: схему верхнего уровня у гостя и подписчика
+(Клуб · Бани/Ретриты · Йога/Консультации · Пригласить друга · Мои билеты/Поддержка),
+вынос рефералки из «О клубе» на главную, скрытые по умолчанию Йога/Консультации и
 объединённую раскладку для редактора админки. Запуск: python -m tests.test_menu
 """
 from __future__ import annotations
@@ -24,42 +25,57 @@ def main() -> None:
     sub = _keys(menu._top_layout(True))
     about = _keys(menu.ABOUTMENU_LAYOUT)
 
-    # Гость: главное действие — вступить; нет управления подпиской.
-    check("гость: есть «вступить»", "join" in guest, True)
-    check("гость: нет «продлить»", "renew" not in guest, True)
+    # Верхняя кнопка «Клуб» контекстна по подписке.
+    check("гость: «вступить» — первая (главное действие)", guest[0], "join")
     check("гость: нет «моя подписка»", "mysub" not in guest, True)
-    check("гость: «вступить» — первое (главное действие)", guest[0], "join")
-
-    # Подписчик: ОДИН раздел «Моя подписка» (продление — внутри него, не дублируется);
-    # нет «вступить».
-    check("подписчик: есть «моя подписка»", "mysub" in sub, True)
-    check("подписчик: нет «продлить» на верхнем уровне (оно внутри «Моя подписка»)",
-          "renew" not in sub, True)
+    check("подписчик: «моя подписка» — первая", sub[0], "mysub")
     check("подписчик: нет «вступить»", "join" not in sub, True)
-    check("подписчик: «моя подписка» — первое (раздел подписки)", sub[0], "mysub")
+    # «Продлить» — не самостоятельная кнопка (внутри «Моя подписка»).
+    check("гость: нет «продлить»", "renew" not in guest, True)
+    check("подписчик: нет «продлить» на верхнем уровне", "renew" not in sub, True)
+
+    # Схема заказчика (прав.txt): Бани/Ретриты, Йога/Консультации, Пригласить друга,
+    # Мои билеты/Поддержка — присутствуют у обоих.
+    for who, keys in (("гость", guest), ("подписчик", sub)):
+        for key in ("banya", "retreat", "yoga", "consult", "referral", "mytickets", "support"):
+            check(f"{who}: есть «{key}»", key in keys, True)
+    # Бани и Ретриты стоят одним рядом (два входа рядом) у обоих статусов.
+    check("гость: Бани/Ретриты одним рядом", ["banya", "retreat"] in menu.LAYOUT_GUEST, True)
+    check("подписчик: Бани/Ретриты одним рядом", ["banya", "retreat"] in menu.LAYOUT_SUB, True)
+
+    # Рефералка переехала из «О клубе» на главную.
+    check("рефералка на главной (гость)", "referral" in guest, True)
+    check("«О клубе»: только инфо-экраны (без рефералки)", about, ["about", "rules"])
+    check("рефералки нет в «О клубе»", "referral" not in about, True)
+
+    # Йога/Консультации скрыты по умолчанию (открываются на этапах 46/47).
+    check("йога скрыта по умолчанию", "yoga" in menu.DEFAULT_HIDDEN, True)
+    check("консультации скрыты по умолчанию", "consult" in menu.DEFAULT_HIDDEN, True)
+    check("бани видимы по умолчанию", "banya" not in menu.DEFAULT_HIDDEN, True)
 
     # Промокода на верхнем уровне нет (ввод — в флоу оплаты).
     check("гость: нет промокода наверху", "promo" not in guest, True)
     check("подписчик: нет промокода наверху", "promo" not in sub, True)
 
-    # Хаб «О клубе» есть у обоих; подменю — инфо + рефералка.
+    # «О клубе» доступен с главной (инфо-экраны не потеряны).
     check("гость: есть «О клубе»", "aboutmenu" in guest, True)
     check("подписчик: есть «О клубе»", "aboutmenu" in sub, True)
-    check("подменю «О клубе»: состав", about, ["about", "rules", "referral"])
-
-    # Компактность верхнего уровня.
-    check("гость: рядов ≤ 3", len(menu._top_layout(False)) <= 3, True)
-    check("подписчик: рядов ≤ 4", len(menu._top_layout(True)) <= 4, True)
 
     # Редактор админки: объединённая раскладка содержит все ключи верхнего уровня.
     union = set(_keys(menu.LAYOUTS["welcome"]))
-    top_all = {"join", "mysub", "events", "mytickets", "aboutmenu", "support"}
+    top_all = {
+        "join", "mysub", "banya", "retreat", "yoga", "consult",
+        "referral", "mytickets", "aboutmenu", "support",
+    }
     check("union для редактора покрывает верхний уровень", top_all.issubset(union), True)
     check("редактор: экран «О клубе» правит инфо-кнопки",
-          _keys(menu.LAYOUTS["aboutmenu"]), ["about", "rules", "referral"])
+          _keys(menu.LAYOUTS["aboutmenu"]), ["about", "rules"])
 
-    # «Продлить» — не самостоятельная кнопка меню (живёт внутри «Моя подписка»).
+    # «renew» — не в реестре кнопок меню.
     check("«renew» не в реестре кнопок меню", "renew" not in menu.BUTTON_DEFS, True)
+    # Старый общий ключ «events» заменён на banya/retreat.
+    check("«events» убран из реестра (заменён на banya/retreat)",
+          "events" not in menu.BUTTON_DEFS, True)
 
     print("\nВсе проверки пройдены.")
 

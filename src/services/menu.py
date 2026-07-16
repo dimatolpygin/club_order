@@ -19,34 +19,50 @@ from .. import keyboards as kb
 from .. import repo
 
 # Реестр: ключ → (дефолтная подпись, callback). Порядок определяет порядок в админке.
+# Новое главное меню (этап 39): верхняя кнопка «Клуб» контекстна по подписке
+# (гость — «Вступить в Клуб 11:11», подписчик — «Клуб 11:11 — Новая реальность»);
+# «Мероприятия» разделены на «Бани» и «Ретриты» (фильтр по виду события); Йога и
+# Консультации добавлены скрытыми (откроются на этапах 46/47).
 BUTTON_DEFS: dict[str, tuple[str, str]] = {
-    "join": ("Вступить в клуб", kb.NAV_JOIN),
-    "mysub": ("Моя подписка", kb.NAV_MYSUB),
+    "join": ("Вступить в Клуб 11:11", kb.NAV_JOIN),
+    "mysub": ("Клуб 11:11 — Новая реальность", kb.NAV_MYSUB),
     "promo": ("Ввести промокод", kb.NAV_PROMO),
-    "events": ("Мероприятия", kb.NAV_EVENTS),
+    "banya": ("Бани", kb.NAV_BANYA),
+    "retreat": ("Ретриты", kb.NAV_RETREAT),
+    "yoga": ("Йога", kb.NAV_YOGA),
+    "consult": ("Консультации", kb.NAV_CONSULT),
+    "referral": ("Пригласить друга", kb.NAV_REFERRAL),
     "mytickets": ("Мои билеты", kb.NAV_MYTICKETS),
     "aboutmenu": ("О клубе", kb.NAV_ABOUTMENU),
-    "referral": ("Пригласить друга", kb.NAV_REFERRAL),
     "about": ("Что внутри клуба", kb.NAV_ABOUT),
     "rules": ("Правила клуба", kb.NAV_RULES),
     "support": ("Поддержка", kb.NAV_SUPPORT),
 }
 
-# Контекстные раскладки верхнего уровня (этап 31): показываем только релевантное
-# статусу подписки, главное действие — первым рядом во всю ширину (иерархия позицией,
-# без эмодзи). Инфо/рефералка спрятаны в подменю «О клубе» (aboutmenu). Промокода на
-# верхнем уровне нет — ввод остаётся в флоу оплаты/тарифа.
-# Управление подпиской — ОДИН раздел: гость видит «Вступить», подписчик — «Моя подписка»
-# (продление живёт ВНУТРИ этого экрана, не дублируется на верхнем уровне).
-LAYOUT_GUEST: list[list[str]] = [
-    ["join"], ["events", "mytickets"], ["aboutmenu", "support"],
+# Кнопки, скрытые по умолчанию (пока не открыт их раздел). Показ включается из
+# веб-админки (menu_buttons.is_visible), когда раздел готов — этапы 46/47.
+DEFAULT_HIDDEN: frozenset[str] = frozenset({"yoga", "consult"})
+
+# Контекстные раскладки верхнего уровня (этап 39, схема заказчика из прав.txt):
+# Клуб · Бани/Ретриты · Йога/Консультации · Пригласить друга · Мои билеты/Поддержка.
+# Верхняя «Клуб» контекстна по подписке (гость — «Вступить», подписчик — раздел
+# подписки; продление живёт ВНУТРИ этого экрана). Йога/Консультации по умолчанию
+# скрыты — их ряд пропадает, пока раздел не открыт (пустой ряд пропускается).
+# «О клубе» (инфо-экраны «Что внутри»/«Правила») сохранён отдельным рядом снизу,
+# чтобы не потерять доступ к нему; рефералка вынесена из него на главную.
+_ROWS_COMMON: list[list[str]] = [
+    ["banya", "retreat"],
+    ["yoga", "consult"],
+    ["referral"],
+    ["mytickets", "support"],
+    ["aboutmenu"],
 ]
-LAYOUT_SUB: list[list[str]] = [
-    ["mysub"], ["events", "mytickets"], ["aboutmenu", "support"],
-]
-# Подменю «О клубе» (открывается по кнопке aboutmenu).
+LAYOUT_GUEST: list[list[str]] = [["join"], *_ROWS_COMMON]
+LAYOUT_SUB: list[list[str]] = [["mysub"], *_ROWS_COMMON]
+# Подменю «О клубе» (открывается по кнопке aboutmenu). Рефералка вынесена на
+# главную (этап 39) — здесь остаются только инфо-экраны.
 ABOUTMENU_LAYOUT: list[list[str]] = [
-    ["about"], ["rules"], ["referral"],
+    ["about"], ["rules"],
 ]
 
 
@@ -69,7 +85,7 @@ async def resolve_config(pool: asyncpg.Pool) -> dict[str, dict]:
         config[key] = {
             "label": custom_label or default_label,
             "default_label": default_label,
-            "is_visible": ov["is_visible"] if ov is not None else True,
+            "is_visible": ov["is_visible"] if ov is not None else (key not in DEFAULT_HIDDEN),
             "custom": custom_label is not None,
         }
     return config
@@ -123,7 +139,8 @@ async def button_list(pool: asyncpg.Pool) -> list[dict]:
 # Верхний уровень контекстен по статусу (этап 31), поэтому для редактора берём ОБЪЕДИНЕНИЕ
 # ключей гостя и подписчика (подписи общие по ключу — правятся независимо от показа).
 _TOP_UNION: list[list[str]] = [
-    ["join"], ["mysub"], ["events", "mytickets"], ["aboutmenu", "support"],
+    ["join"], ["mysub"], ["banya", "retreat"], ["yoga", "consult"],
+    ["referral"], ["mytickets", "support"], ["aboutmenu"],
 ]
 LAYOUTS: dict[str, list[list[str]]] = {
     "welcome": _TOP_UNION,

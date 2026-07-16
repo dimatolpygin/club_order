@@ -18,7 +18,11 @@ NAV_TARIFF = "nav:tariff"    # Выбрать тариф
 NAV_MYSUB = "nav:mysub"      # Моя подписка
 NAV_RENEW = "nav:renew"      # Продлить подписку
 NAV_PROMO = "nav:promo"      # Ввести промокод
-NAV_EVENTS = "nav:events"    # Мероприятия (билеты «Фокус.Энергия», этап 13)
+NAV_EVENTS = "nav:events"    # Мероприятия (все виды) — совместимость со старыми кнопками
+NAV_BANYA = "nav:banya"      # Бани — события kind=banya (этап 39)
+NAV_RETREAT = "nav:retreat"  # Ретриты — события kind=retreat (этап 39)
+NAV_YOGA = "nav:yoga"        # Йога (этап 46; на этапе 39 кнопка скрыта)
+NAV_CONSULT = "nav:consult"  # Консультации (этап 47; на этапе 39 кнопка скрыта)
 NAV_REFERRAL = "nav:referral"  # Пригласить друга / моя реф-ссылка (этап 17)
 NAV_MYTICKETS = "nav:mytickets"  # Мои билеты (этап 18)
 
@@ -152,6 +156,21 @@ def to_menu_kb() -> InlineKeyboardMarkup:
 
 
 # ── Мероприятия (этап 13) ────────────────────────────────────────────────────
+def events_nav_for_kind(kind: str | None) -> str:
+    """Callback списка мероприятий для вида события (этап 39).
+
+    Кнопки «Назад»/«К мероприятиям» из карточки события возвращают в тот же
+    раздел, откуда пришли: баня → «Бани», ретрит → «Ретриты», иначе — общий
+    список (совместимость).
+    """
+    from .services import events as ev
+    if kind == ev.KIND_BANYA:
+        return NAV_BANYA
+    if kind == ev.KIND_RETREAT:
+        return NAV_RETREAT
+    return NAV_EVENTS
+
+
 def events_list_kb(groups: list, sold_out_ids: set | None = None) -> InlineKeyboardMarkup:
     """Список событий: кнопка на событие с подписью типа (Тип · Название · дата).
 
@@ -176,12 +195,13 @@ def events_list_kb(groups: list, sold_out_ids: set | None = None) -> InlineKeybo
 
 
 def event_tickets_kb(
-    event_id: int, items: list[tuple[str, int, bool]]
+    event_id: int, items: list[tuple[str, int, bool]], back_cb: str = NAV_EVENTS
 ) -> InlineKeyboardMarkup:
     """Меню типов билетов события.
 
     `items` — `(ticket_type, price, available)` из services.events.seat_availability.
     Доступный тип → переход к покупке; без мест → попап «Мест нет» (EVT_FULL).
+    `back_cb` (этап 39) — куда ведёт «Назад»: список бань/ретритов по виду события.
     """
     from .services import events as ev
     from .utils import fmt_price
@@ -203,18 +223,18 @@ def event_tickets_kb(
                     callback_data=EVT_FULL,
                 )
             )
-    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_EVENTS))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=back_cb))
     return b.as_markup()
 
 
-def event_sold_out_kb(support_url: str | None) -> InlineKeyboardMarkup:
+def event_sold_out_kb(support_url: str | None, back_cb: str = NAV_EVENTS) -> InlineKeyboardMarkup:
     """Событие распродано: «Запрос в Поддержку» (если ссылка задана) + «Назад»."""
     b = InlineKeyboardBuilder()
     if support_url:
         b.row(InlineKeyboardButton(text="Запрос в Поддержку", url=support_url))
     else:
         b.row(InlineKeyboardButton(text="Запрос в Поддержку", callback_data=NAV_SUPPORT))
-    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_EVENTS))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=back_cb))
     return b.as_markup()
 
 
@@ -307,10 +327,10 @@ def ticket_rules_kb(ticket_id: int) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def ticket_address_kb() -> InlineKeyboardMarkup:
-    """После показа адреса: к списку мероприятий + в главное меню."""
+def ticket_address_kb(back_cb: str = NAV_EVENTS) -> InlineKeyboardMarkup:
+    """После показа адреса: к списку мероприятий (по виду события) + в главное меню."""
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="К мероприятиям", callback_data=NAV_EVENTS))
+    b.row(InlineKeyboardButton(text="К мероприятиям", callback_data=back_cb))
     b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
     return b.as_markup()
 
