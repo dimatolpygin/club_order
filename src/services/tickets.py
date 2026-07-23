@@ -12,6 +12,7 @@ sync_ticket_payment вызывается и фоновым поллером (ч�
 """
 from __future__ import annotations
 
+from contextlib import suppress
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -21,6 +22,7 @@ from aiogram import Bot
 from .. import repo, texts
 from ..logger import logger
 from ..utils import fmt_price
+from . import admin_alerts
 from . import app_settings
 from . import events as ev
 from . import promo as promo_service
@@ -333,6 +335,11 @@ async def sync_ticket_payment(
             logger.info(
                 f"✅ Билет #{ticket_id} выдан (tg_id={payment['tg_id']}, yk_id={yk_id})"
             )
+            # Уведомление админам о продаже (этап 42) — сбой не должен влиять на выдачу.
+            with suppress(Exception):
+                await admin_alerts.ticket_sold(
+                    pool, bot, tg_id=payment["tg_id"], ticket=ticket, event=event
+                )
             if notify:
                 await _notify_ticket_success(bot, payment["tg_id"], ticket, event)
         return "succeeded", ticket

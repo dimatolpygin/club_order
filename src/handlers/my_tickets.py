@@ -20,8 +20,8 @@ import asyncpg
 
 from .. import keyboards as kb
 from .. import repo, texts
-from ..config import settings
 from ..logger import logger
+from ..services import admin_alerts
 from ..services import app_settings
 from ..services import events as ev
 from ..utils import fmt_price
@@ -40,23 +40,6 @@ async def _edit(cb: CallbackQuery, text: str, markup) -> None:
         with suppress(TelegramBadRequest):  # «message is not modified» — не критично
             await cb.message.edit_text(text, reply_markup=markup)
     await cb.answer()
-
-
-def _all_admin_ids() -> list[int]:
-    """Все получатели заявок: админы из .env + добавленные из админки (без дублей)."""
-    return sorted(set(settings.admin_id_list) | app_settings.extra_admin_ids())
-
-
-async def _notify_admins(bot: Bot, text: str) -> int:
-    """Шлёт текст всем админам. Возвращает число успешно доставленных сообщений."""
-    sent = 0
-    for admin_id in _all_admin_ids():
-        try:
-            await bot.send_message(admin_id, text)
-            sent += 1
-        except Exception as e:  # noqa: BLE001 — админ мог не начать диалог с ботом
-            logger.warning(f"Не удалось уведомить админа id={admin_id}: {e}")
-    return sent
 
 
 # ── Список активных билетов ──────────────────────────────────────────────────
@@ -179,7 +162,7 @@ async def refund_send(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool) -> None:
         price=fmt_price(ticket["price"]),
         ticket_id=ticket_id,
     )
-    sent = await _notify_admins(bot, notice)
+    sent = await admin_alerts.notify_admins(bot, notice)
     # Статус билета НЕ меняем — возврат ручной, место не освобождаем до факта возврата.
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:myticket:refund:sent:{ticket_id}")
     if sent > 0:

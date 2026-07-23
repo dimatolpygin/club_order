@@ -16,6 +16,7 @@ from .. import keyboards as kb
 from .. import repo, texts
 from ..config import settings
 from ..logger import logger
+from . import admin_alerts
 
 
 async def kick_from_group(bot: Bot, tg_id: int, reason: str = "подписка истекла") -> None:
@@ -51,6 +52,10 @@ async def run_expiry_check(pool: asyncpg.Pool, bot: Bot) -> None:
         try:
             await kick_from_group(bot, tg_id)
             await _notify_ended(bot, tg_id)
+            # Уведомление админам о выходе за неуплату (этап 42). Подписка уже
+            # помечена 'expired' — сводка по клубу считается без выбывшего.
+            with suppress(Exception):
+                await admin_alerts.subscription_expired(pool, bot, tg_id=tg_id)
             logger.info(f"🔚 Подписка #{row['id']} завершена (tg_id={tg_id})")
         except Exception as e:  # noqa: BLE001 — один юзер не должен ронять цикл
             logger.error(f"Проверка окончаний: ошибка по tg_id={tg_id}: {e}")

@@ -1044,6 +1044,72 @@ async def checkin_stats(pool: asyncpg.Pool, event_id: int | None = None) -> dict
     return dict(row)
 
 
+async def event_sales_summary(pool: asyncpg.Pool, event_id: int) -> dict:
+    """Сводка продаж по событию для уведомления админам (этап 42), один запрос.
+
+    · `tickets` — продано билетов (оплаченные; возвращённые не в счёт);
+    · `people`  — занято мест (парный билет = 2 человека);
+    · `amount`  — на какую сумму продано (фактически оплаченные цены билетов);
+    · `seats`   — мест всего: при раздельном учёте М/Ж — их сумма, иначе
+      `seats_total`; None = не ограничено.
+    """
+    row = await pool.fetchrow(
+        f"""
+        SELECT
+            (SELECT count(*) FROM tickets t
+              WHERE t.event_id = e.id AND t.status = 'paid') AS tickets,
+            (SELECT COALESCE(SUM({_PEOPLE_EXPR}), 0) FROM tickets t
+              WHERE t.event_id = e.id AND t.status = 'paid') AS people,
+            (SELECT COALESCE(SUM(t.price), 0) FROM tickets t
+              WHERE t.event_id = e.id AND t.status = 'paid') AS amount,
+            CASE WHEN e.gender_balance
+                 THEN COALESCE(e.seats_male, 0) + COALESCE(e.seats_female, 0)
+                 ELSE e.seats_total
+            END AS seats
+        FROM events e
+        WHERE e.id = $1
+        """,
+        event_id,
+    )
+    if row is None:
+        return {"tickets": 0, "people": 0, "amount": Decimal(0), "seats": None}
+    return {
+        "tickets": int(row["tickets"]),
+        "people": int(row["people"]),
+        "amount": Decimal(row["amount"]),
+        "seats": None if row["seats"] is None else int(row["seats"]),
+    }
+
+
+async def club_members_summary(pool: asyncpg.Pool) -> dict:
+    """Сводка по клубу для уведомления админам (этап 42), один запрос.
+
+    · `members` — активных подписчиков (люди, а не подписки: DISTINCT tg_id);
+    · `amount`  — сумма их **последних успешных оплат**: сколько каждый заплатил
+      за последнее продление. Выданные вручную/бесплатные участники (успешных
+      платежей нет) считаются нулём — как в примере заказчика.
+    """
+    row = await pool.fetchrow(
+        """
+        WITH active AS (
+            SELECT DISTINCT tg_id FROM subscriptions
+            WHERE status = 'active' AND end_date > now()
+        ), last_paid AS (
+            SELECT a.tg_id, (
+                SELECT p.amount FROM payments p
+                WHERE p.tg_id = a.tg_id AND p.status = 'succeeded'
+                  AND p.kind <> 'ticket'
+                ORDER BY p.updated_at DESC, p.id DESC
+                LIMIT 1
+            ) AS amount
+            FROM active a
+        )
+        SELECT count(*) AS members, COALESCE(SUM(amount), 0) AS amount FROM last_paid
+        """
+    )
+    return {"members": int(row["members"]), "amount": Decimal(row["amount"])}
+
+
 async def refunds_pending_notify(pool: asyncpg.Pool) -> list[asyncpg.Record]:
     """Возвращённые билеты, по которым ещё не отправлено уведомление о возврате.
 

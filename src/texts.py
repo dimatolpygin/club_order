@@ -693,6 +693,76 @@ TICKET_REFUND_NO_ADMINS = (
 )
 
 
+# ── Уведомления админам о продажах (этап 42) ─────────────────────────────────
+def _buyer_line(username: str | None, first_name: str | None, user_id: int) -> str:
+    """Покупатель одной строкой: ник + кликабельное имя (работает и без username)."""
+    name = first_name or "пользователь"
+    uname = f"@{username}" if username else "без username"
+    return f'<a href="tg://user?id={user_id}">{name}</a> ({uname})'
+
+
+def _event_sales_lines(tickets: int, people: int, amount: str, seats: int | None) -> str:
+    """Две строки сводки по мероприятию (формат заказчика от 11.07.2026).
+
+    Занятые места показываем отдельно, только если они разошлись с числом билетов
+    (парный билет = 2 человека) — иначе строка была бы дублем.
+    """
+    of_seats = f" из {seats}" if seats else ""
+    seats_note = f" (занято мест: {people})" if people != tickets else ""
+    return (
+        f"Всего продано {tickets} билетов{of_seats}{seats_note}\n"
+        f"Всего продано {tickets} билетов на сумму {amount} рублей"
+    )
+
+
+def _club_summary_line(members: int, amount: str) -> str:
+    """Строка сводки по клубу: активные подписчики и их последние оплаты."""
+    return f"Всего активных подписчиков {members} человек, на сумму {amount} рублей"
+
+
+def admin_ticket_sale(
+    *, username: str | None, first_name: str | None, user_id: int,
+    title: str, ticket_label: str, price: str,
+    tickets: int, people: int, amount: str, seats: int | None,
+) -> str:
+    """Продан билет: кто, что, почём + сводка по этому мероприятию (этап 42)."""
+    return (
+        "<b>ПРОДАН БИЛЕТ</b>\n\n"
+        f"На мероприятие <b>{title}</b>\n"
+        f"{_buyer_line(username, first_name, user_id)} купил билет "
+        f"({ticket_label}) за {price} ₽\n\n"
+        f"{_event_sales_lines(tickets, people, amount, seats)}"
+    )
+
+
+def admin_subscription_sale(
+    *, username: str | None, first_name: str | None, user_id: int,
+    renewal: bool, price: str, period: str, members: int, amount: str,
+) -> str:
+    """Оплачена/продлена подписка + сводка по клубу (этап 42)."""
+    action = "продлил подписку" if renewal else "вступил в клуб"
+    head = "ПРОДЛЕНИЕ ПОДПИСКИ" if renewal else "НОВАЯ ПОДПИСКА"
+    return (
+        f"<b>{head}</b>\n\n"
+        f"{_buyer_line(username, first_name, user_id)} {action} "
+        f"на {period} за {price} ₽\n\n"
+        f"{_club_summary_line(members, amount)}"
+    )
+
+
+def admin_subscription_expired(
+    *, username: str | None, first_name: str | None, user_id: int,
+    members: int, amount: str,
+) -> str:
+    """Участник вышел за неуплату (кик по окончании) + сводка по клубу (этап 42)."""
+    return (
+        "<b>ВЫХОД ЗА НЕУПЛАТУ</b>\n\n"
+        f"{_buyer_line(username, first_name, user_id)} — подписка закончилась и не "
+        "продлена, участник удалён из группы\n\n"
+        f"{_club_summary_line(members, amount)}"
+    )
+
+
 def ticket_refund_admin_notice(
     *, username: str | None, user_id: int, first_name: str | None,
     title: str, ticket_label: str, starts_at, price: str, ticket_id: int,

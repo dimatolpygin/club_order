@@ -10,6 +10,7 @@ sync_payment дёргается и фоновым поллером, и кноп�
 """
 from __future__ import annotations
 
+from contextlib import suppress
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -24,6 +25,7 @@ from .. import repo, texts
 from ..config import settings
 from ..logger import logger
 from ..utils import fmt_price
+from . import admin_alerts
 from . import promo as promo_service
 from . import referral_rules as ref_rules
 from . import tariffs
@@ -352,6 +354,11 @@ async def sync_payment(
                 f"yk_id={yk_id})"
             )
             await _notify_success(bot, payment["tg_id"], sub)
+            # Уведомление админам о продаже (этап 42) — сбой не влияет на активацию.
+            with suppress(Exception):
+                await admin_alerts.subscription_paid(
+                    pool, bot, tg_id=payment["tg_id"], payment=payment, subscription=sub
+                )
             # Первая покупка подписки новичком квалифицирует реф-связь (этап 40).
             # У подписки нет даты события → бонус пригласившему начисляется сразу.
             # Продление не трогаем: связь к тому моменту давно не 'pending'.
