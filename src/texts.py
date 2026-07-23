@@ -164,11 +164,23 @@ TARIFF_NONE = (
 
 
 # Итоговая сводка перед оплатой (без упоминания ступеней — это внутренняя механика).
-def tariff_summary(value: int, unit: str, total: str) -> str:
+def tariff_summary(
+    value: int, unit: str, total: str, base: str = "", discount: int = 0
+) -> str:
+    """Сводка подписки. `discount`>0 — скидка новичка по реф-ссылке (этап 40):
+    показываем зачёркнутую полную цену, величину скидки и итог."""
+    if discount > 0 and base:
+        price_block = (
+            f"Цена: <s>{base} ₽</s>\n"
+            f"Скидка новичка по приглашению: <b>−{discount} ₽</b>\n\n"
+            f"<b>Итого к оплате: {total} ₽</b>\n\n"
+        )
+    else:
+        price_block = f"<b>Итого к оплате: {total} ₽</b>\n\n"
     return (
         "<b>ОФОРМЛЕНИЕ ПОДПИСКИ</b>\n\n"
         f"Срок: {period_phrase(value, unit)}\n\n"
-        f"<b>Итого к оплате: {total} ₽</b>\n\n"
+        f"{price_block}"
         "После оплаты доступ в закрытый клуб откроется автоматически."
     )
 

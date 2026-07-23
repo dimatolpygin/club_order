@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -18,6 +19,7 @@ from redis.asyncio import Redis
 from .. import keyboards as kb
 from .. import repo, texts
 from ..logger import logger
+from ..services import payments
 from ..services import tariffs
 from ..utils import fmt_price
 
@@ -87,7 +89,11 @@ async def show_summary(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
 
     months = duration["months"]
     unit = duration["unit"]
-    total = await tariffs.period_price(pool, redis, tier, months, unit)
+    base = await tariffs.period_price(pool, redis, tier, months, unit)
+    # Скидка новичка по реф-ссылке (этап 40) — считаем тем же хелпером, что и при
+    # создании платежа, чтобы сводка и итоговая сумма всегда совпадали.
+    discount = await payments.referral_discount_for_subscription(pool, cb.from_user.id, base)
+    total = base - Decimal(discount) if discount else base
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:summary:{months}{unit}")
 
     b = InlineKeyboardBuilder()
@@ -95,10 +101,11 @@ async def show_summary(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
     b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_TARIFF))
     await _edit(
         cb,
-        texts.tariff_summary(months, unit, fmt_price(total)),
+        texts.tariff_summary(months, unit, fmt_price(total), fmt_price(base), discount),
         b.as_markup(),
     )
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: сводка {texts.period_phrase(months, unit)} "
         f"= {fmt_price(total)} ₽"
+        + (f" (скидка новичка −{discount} ₽)" if discount else "")
     )

@@ -35,7 +35,7 @@ from .yookassa import YooKassaError, create_payment, get_payment, new_idempotenc
 MIN_PAYMENT_AMOUNT = Decimal("1.00")
 
 
-async def _referral_discount_for_subscription(
+async def referral_discount_for_subscription(
     pool: asyncpg.Pool, tg_id: int, base_amount: Decimal
 ) -> int:
     """Скидка новичка по реф-ссылке на подписку, ₽ (0 — неприменимо), этап 40.
@@ -80,7 +80,7 @@ async def start_payment(
     amount = await tariffs.period_price(pool, redis, tier, months, unit)
     # Скидка новичка по реф-ссылке (этап 40): разовая, зафиксированную ставку
     # (monthly) не трогает — по ней пойдут продления уже без скидки.
-    ref_discount = await _referral_discount_for_subscription(pool, tg_id, amount)
+    ref_discount = await referral_discount_for_subscription(pool, tg_id, amount)
     if ref_discount:
         amount = amount - Decimal(ref_discount)
     user = await repo.get_user(pool, tg_id)
@@ -249,7 +249,7 @@ async def start_promo_payment(
     # Скидка новичка по реф-ссылке и промокод НЕ суммируются — берём ту, что даёт
     # меньшую сумму (этапы 16/40). Если выигрывает рефералка, промокод НЕ расходуем
     # (останется у пользователя на будущее) и ставку фиксируем обычную, не спец.
-    ref_discount = await _referral_discount_for_subscription(pool, tg_id, period)
+    ref_discount = await referral_discount_for_subscription(pool, tg_id, period)
     use_referral = ref_discount > 0 and (period - Decimal(ref_discount)) < amount
     if use_referral:
         amount = period - Decimal(ref_discount)
