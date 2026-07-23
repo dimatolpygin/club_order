@@ -53,6 +53,15 @@ def main() -> None:
     check("консультации скрыты по умолчанию", "consult" in menu.DEFAULT_HIDDEN, True)
     check("бани видимы по умолчанию", "banya" not in menu.DEFAULT_HIDDEN, True)
 
+    # «Мои бонусы» (этап 41): второй кнопкой в ряду рефералки — верхний уровень
+    # не вырос (столько же рядов, сколько было до этапа 41).
+    check("гость: есть «Мои бонусы»", "bonuses" in guest, True)
+    check("подписчик: есть «Мои бонусы»", "bonuses" in sub, True)
+    check("бонусы в одном ряду с рефералкой",
+          ["referral", "bonuses"] in menu.LAYOUT_GUEST, True)
+    check("верхний уровень остался в 6 рядов", len(menu.LAYOUT_GUEST), 6)
+    check("бонусы видимы по умолчанию", "bonuses" not in menu.DEFAULT_HIDDEN, True)
+
     # Промокода на верхнем уровне нет (ввод — в флоу оплаты).
     check("гость: нет промокода наверху", "promo" not in guest, True)
     check("подписчик: нет промокода наверху", "promo" not in sub, True)
@@ -65,7 +74,7 @@ def main() -> None:
     union = set(_keys(menu.LAYOUTS["welcome"]))
     top_all = {
         "join", "mysub", "banya", "retreat", "yoga", "consult",
-        "referral", "mytickets", "aboutmenu", "support",
+        "referral", "bonuses", "mytickets", "aboutmenu", "support",
     }
     check("union для редактора покрывает верхний уровень", top_all.issubset(union), True)
     check("редактор: экран «О клубе» правит инфо-кнопки",

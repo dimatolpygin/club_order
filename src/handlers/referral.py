@@ -62,3 +62,28 @@ async def nav_referral(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool, state: F
         await cb.message.delete()
     await _show_link(cb.message, bot, pool, cb.from_user.id)
     await cb.answer()
+
+
+# ── «Мои бонусы» (этап 41) ───────────────────────────────────────────────────
+@router.callback_query(F.data == kb.NAV_BONUSES)
+async def nav_bonuses(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> None:
+    """Активные · скоро начислится · всего за всё время.
+
+    Предыдущее сообщение может быть фото (инфо-экран с картинкой, этап 37) или
+    экраном реф-ссылки — в обоих случаях правка текста невозможна/нежелательна,
+    поэтому шлём новым сообщением.
+    """
+    await state.clear()
+    await repo.set_fsm_state(pool, cb.from_user.id, "screen:bonuses")
+    b = await repo.bonus_overview(pool, cb.from_user.id)
+    with suppress(TelegramBadRequest):
+        await cb.message.delete()
+    await cb.message.answer(
+        texts.my_bonuses(b["active"], b["pending"], b["total"]),
+        reply_markup=kb.bonuses_kb(),
+    )
+    await cb.answer()
+    logger.info(
+        f"🤖 Бот → @{cb.from_user.username or '—'}: мои бонусы — доступно {b['active']} ₽, "
+        f"скоро {b['pending']} ₽, всего {b['total']} ₽"
+    )

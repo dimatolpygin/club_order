@@ -31,18 +31,21 @@ from datetime import datetime, timedelta, timezone
 from aiogram import Bot
 import asyncpg
 
+from .. import keyboards as kb
 from .. import repo, texts
 from ..config import settings
 from ..logger import logger
 from .events import kind_label
 
 
-async def _broadcast(bot: Bot, holders: list[asyncpg.Record], text: str, tag: str) -> int:
+async def _broadcast(
+    bot: Bot, holders: list[asyncpg.Record], text: str, tag: str, markup=None
+) -> int:
     """Рассылает текст списку купивших. Возвращает число доставленных."""
     sent = 0
     for h in holders:
         with suppress(Exception):  # пользователь мог заблокировать бота
-            await bot.send_message(h["tg_id"], text)
+            await bot.send_message(h["tg_id"], text, reply_markup=markup)
             sent += 1
             logger.info(
                 f"🔔 {tag} → @{h['username'] or '—'} "
@@ -60,7 +63,10 @@ async def _send_day_before(pool: asyncpg.Pool, bot: Bot, now: datetime) -> None:
             continue
         holders = await repo.paid_ticket_holders(pool, e["id"])
         text = texts.event_day_before(kind_label(e["kind"]), e["title"], e["starts_at"])
-        n = await _broadcast(bot, holders, text, "Напоминание о событии")
+        # Кнопка «Мои билеты» (этап 41): из напоминания сразу в билет (адрес/правила).
+        n = await _broadcast(
+            bot, holders, text, "Напоминание о событии", markup=kb.event_reminder_kb()
+        )
         logger.info(
             "Напоминание за 1 день по событию #{} «{}» — отправлено {} получателям",
             e["id"], e["title"], n,

@@ -25,6 +25,7 @@ NAV_YOGA = "nav:yoga"        # Йога (этап 46; на этапе 39 кно�
 NAV_CONSULT = "nav:consult"  # Консультации (этап 47; на этапе 39 кнопка скрыта)
 NAV_REFERRAL = "nav:referral"  # Пригласить друга / моя реф-ссылка (этап 17)
 NAV_MYTICKETS = "nav:mytickets"  # Мои билеты (этап 18)
+NAV_BONUSES = "nav:bonuses"  # Мои бонусы: активные · скоро начислится · всего (этап 41)
 
 # Раздел «Мои билеты» (этап 18).
 MYT_OPEN = "myt"             # myt:{ticket_id} — карточка билета
@@ -81,13 +82,38 @@ def support_kb(url: str | None) -> InlineKeyboardMarkup:
 
 
 def referral_link_kb(share_url: str) -> InlineKeyboardMarkup:
-    """Экран реф-ссылки: поделиться (готовый текст приглашения) + в меню."""
+    """Экран реф-ссылки: поделиться (готовый текст приглашения) + бонусы + в меню."""
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(
         text="Поделиться приглашением",
         switch_inline_query=f" {share_url}",
     ))
+    b.row(InlineKeyboardButton(text="Мои бонусы", callback_data=NAV_BONUSES))
     b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
+    return b.as_markup()
+
+
+def bonuses_kb() -> InlineKeyboardMarkup:
+    """Экран «Мои бонусы» (этап 41): позвать друга (растит баланс) + в меню."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Пригласить друга", callback_data=NAV_REFERRAL))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
+    return b.as_markup()
+
+
+def bonus_accrued_kb() -> InlineKeyboardMarkup:
+    """Автосообщение о бонусах (этап 41): не тупик — «Мои бонусы» · «Главное меню»."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Мои бонусы", callback_data=NAV_BONUSES))
+    b.row(InlineKeyboardButton(text="Главное меню", callback_data=NAV_START))
+    return b.as_markup()
+
+
+def event_reminder_kb() -> InlineKeyboardMarkup:
+    """Автонапоминание о событии (этап 41): «Мои билеты» — сразу к билету."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Мои билеты", callback_data=NAV_MYTICKETS))
+    b.row(InlineKeyboardButton(text="Главное меню", callback_data=NAV_START))
     return b.as_markup()
 
 

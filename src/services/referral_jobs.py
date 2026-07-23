@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncpg
 from aiogram import Bot
 
+from .. import keyboards as kb
 from .. import repo, texts
 from ..logger import logger
 
@@ -38,7 +39,10 @@ async def run_referral_accrual(pool: asyncpg.Pool, bot: Bot) -> None:
             continue
         try:
             await bot.send_message(
-                r["referrer_tg_id"], texts.referral_bonus_accrued(title, bonus)
+                r["referrer_tg_id"],
+                texts.referral_bonus_accrued(title, bonus),
+                # Кнопки «Мои бонусы» · «Главное меню» (этап 41) — сообщение не тупик.
+                reply_markup=kb.bonus_accrued_kb(),
             )
         except Exception as e:  # noqa: BLE001 — пользователь мог заблокировать бота
             logger.warning(f"Не удалось уведомить о реф-бонусе id={r['referrer_tg_id']}: {e}")

@@ -1821,6 +1821,33 @@ async def bonus_balance(conn, tg_id: int) -> int:
     return int(row["bal"])
 
 
+async def bonus_overview(pool: asyncpg.Pool, tg_id: int) -> dict[str, int]:
+    """Сводка бонусов для экрана «Мои бонусы» (этап 41).
+
+    · `active`  — доступно сейчас (баланс = SUM(delta), с учётом списаний);
+    · `pending` — скоро начислится: связи в статусе 'qualified', момент начисления
+      которых ещё не наступил (билет ждёт даты события; 'void' и 'accrued' не в счёт);
+    · `total`   — всего начислено за всё время (сумма положительных операций:
+      реф-бонусы, ручные начисления, возвраты списанного).
+    """
+    row = await pool.fetchrow(
+        """
+        SELECT
+            (SELECT COALESCE(SUM(delta), 0) FROM bonus_ledger WHERE tg_id = $1) AS active,
+            (SELECT COALESCE(SUM(delta), 0) FROM bonus_ledger
+              WHERE tg_id = $1 AND delta > 0) AS total,
+            (SELECT COALESCE(SUM(bonus_amount), 0) FROM referrals
+              WHERE referrer_tg_id = $1 AND status = 'qualified') AS pending
+        """,
+        tg_id,
+    )
+    return {
+        "active": int(row["active"]),
+        "pending": int(row["pending"]),
+        "total": int(row["total"]),
+    }
+
+
 async def spend_bonuses(
     pool: asyncpg.Pool, *, tg_id: int, payment_id: int, amount: int
 ) -> bool:

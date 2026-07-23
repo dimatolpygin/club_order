@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 import asyncpg
 from aiogram import Bot
 
+from .. import keyboards as kb
 from .. import repo, texts
 from ..logger import logger
 from . import referral_rules as ref_rules
@@ -79,6 +80,8 @@ async def qualify_and_notify(
         purchase_title, bonus, accrue_at=None if instant else event_starts_at
     )
     try:
-        await bot.send_message(referrer, text)
+        # Кнопки «Мои бонусы» · «Главное меню» (этап 41): и при начислении сразу,
+        # и при отложенном — в разделе видно «скоро начислится».
+        await bot.send_message(referrer, text, reply_markup=kb.bonus_accrued_kb())
     except Exception as e:  # noqa: BLE001 — пригласивший мог заблокировать бота
         logger.warning(f"Не удалось уведомить пригласившего id={referrer}: {e}")

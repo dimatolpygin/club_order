@@ -765,6 +765,33 @@ def referral_bound(newbie_discount: str) -> str:
     )
 
 
+def my_bonuses(active: int, pending: int, total: int) -> str:
+    """Экран «Мои бонусы» (этап 41): доступно · скоро начислится · всего за всё время."""
+    lines = [
+        "<b>МОИ БОНУСЫ</b>",
+        "",
+        f"Доступно сейчас: <b>{active} ₽</b>",
+    ]
+    if pending > 0:
+        lines.append(f"Скоро начислится: <b>{pending} ₽</b>")
+    lines.append(f"Всего начислено за всё время: <b>{total} ₽</b>")
+    lines.append("")
+    if pending > 0:
+        lines.append(
+            "«Скоро начислится» — бонусы за друзей, которые уже купили билет: "
+            "они станут доступными после даты мероприятия."
+        )
+        lines.append("")
+    lines.append(
+        "1 бонус = 1 ₽. Бонусами можно оплатить до 50% стоимости покупки — "
+        "они предложатся при оформлении."
+    )
+    if active == 0 and pending == 0 and total == 0:
+        lines.append("")
+        lines.append("Пока бонусов нет. Пригласи друга — за его покупку начислим бонусы.")
+    return "\n".join(lines)
+
+
 def referral_bonus_accrued(event_title: str | None, bonus: int) -> str:
     """Бонус начислен отложенным джобом (после даты события), этапы 17/40."""
     what = (

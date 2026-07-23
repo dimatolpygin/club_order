@@ -32,6 +32,7 @@ BUTTON_DEFS: dict[str, tuple[str, str]] = {
     "yoga": ("Йога", kb.NAV_YOGA),
     "consult": ("Консультации", kb.NAV_CONSULT),
     "referral": ("Пригласить друга", kb.NAV_REFERRAL),
+    "bonuses": ("Мои бонусы", kb.NAV_BONUSES),
     "mytickets": ("Мои билеты", kb.NAV_MYTICKETS),
     "aboutmenu": ("О клубе", kb.NAV_ABOUTMENU),
     "about": ("Что внутри клуба", kb.NAV_ABOUT),
@@ -50,10 +51,13 @@ DEFAULT_HIDDEN: frozenset[str] = frozenset({"yoga", "consult"})
 # скрыты — их ряд пропадает, пока раздел не открыт (пустой ряд пропускается).
 # «О клубе» (инфо-экраны «Что внутри»/«Правила») сохранён отдельным рядом снизу,
 # чтобы не потерять доступ к нему; рефералка вынесена из него на главную.
+# «Мои бонусы» (этап 41) подсажены ВТОРОЙ кнопкой в ряд рефералки — новый ряд не
+# добавляется, верхний уровень не растёт; второй вход в раздел — с экрана
+# «Пригласить друга». Скрыть кнопку можно из веб-админки (menu_buttons).
 _ROWS_COMMON: list[list[str]] = [
     ["banya", "retreat"],
     ["yoga", "consult"],
-    ["referral"],
+    ["referral", "bonuses"],
     ["mytickets", "support"],
     ["aboutmenu"],
 ]
@@ -140,7 +144,7 @@ async def button_list(pool: asyncpg.Pool) -> list[dict]:
 # ключей гостя и подписчика (подписи общие по ключу — правятся независимо от показа).
 _TOP_UNION: list[list[str]] = [
     ["join"], ["mysub"], ["banya", "retreat"], ["yoga", "consult"],
-    ["referral"], ["mytickets", "support"], ["aboutmenu"],
+    ["referral", "bonuses"], ["mytickets", "support"], ["aboutmenu"],
 ]
 LAYOUTS: dict[str, list[list[str]]] = {
     "welcome": _TOP_UNION,
