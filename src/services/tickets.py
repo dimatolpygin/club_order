@@ -24,24 +24,27 @@ from ..utils import fmt_price
 from . import app_settings
 from . import events as ev
 from . import promo as promo_service
+from . import referral_rules as ref_rules
+from .referral_notify import qualify_and_notify
 from .receipt import build_receipt
 from .yookassa import create_payment, get_payment, new_idempotence_key
 
 
-async def _referral_discount(pool: asyncpg.Pool, tg_id: int, event, newbie_discount: int) -> int:
-    """Скидка новичка по реф-ссылке на баню, ₽ (0 — неприменимо) (этап 17).
+async def _referral_discount(pool: asyncpg.Pool, tg_id: int, event, base_price) -> int:
+    """Скидка новичка по реф-ссылке на билет, ₽ (0 — неприменимо) (этапы 17/40).
 
-    Действует только: событие — баня; пользователь привязан как приглашённый и
-    связь ещё 'pending' (первая покупка); пользователь всё ещё новичок.
+    С этапа 40 действует и на бани, и на ретриты: сумма берётся из правила
+    категории (`referral_rules`) и может быть фиксированной или процентом от цены
+    билета. Условия прежние: пользователь привязан как приглашённый, связь ещё
+    'pending' (первая покупка), пользователь всё ещё новичок.
     """
-    if event["kind"] != ev.KIND_BANYA:
-        return 0
     refr = await repo.get_referral_by_invitee(pool, tg_id)
     if refr is None or refr["status"] != "pending":
         return 0
     if not await repo.is_newbie(pool, tg_id):
         return 0
-    return newbie_discount
+    rule = await repo.get_referral_rule(pool, ref_rules.category_for_event_kind(event["kind"]))
+    return ref_rules.discount_for(rule, base_price)
 
 
 async def compute_ticket_pricing(
@@ -57,8 +60,7 @@ async def compute_ticket_pricing(
     is_subscriber = await repo.get_active_subscription(pool, tg_id) is not None
     subscriber_pct = event["subscriber_discount_percent"] if is_subscriber else 0
     promo_pct, promo = await _promo_percent(pool, promo_id, tg_id)
-    sums = await app_settings.referral_sums(pool)
-    referral_amount = await _referral_discount(pool, tg_id, event, sums["newbie_discount"])
+    referral_amount = await _referral_discount(pool, tg_id, event, base_price)
 
     price, applied = ev.best_ticket_price(
         base_price, subscriber_pct=subscriber_pct, promo_pct=promo_pct,
@@ -324,8 +326,10 @@ async def sync_ticket_payment(
         ticket = await repo.get_ticket(pool, ticket_id)
         if created:
             event = await repo.get_event(pool, payment["event_id"])
-            # Первая покупка бани новичком квалифицирует реф-связь (бонус — после события).
-            await _qualify_referral_after_purchase(pool, payment["tg_id"], event)
+            # Первая покупка билета новичком квалифицирует реф-связь (бонус — после события).
+            await _qualify_referral_after_purchase(
+                pool, bot, payment["tg_id"], event, payment["amount"]
+            )
             logger.info(
                 f"✅ Билет #{ticket_id} выдан (tg_id={payment['tg_id']}, yk_id={yk_id})"
             )
@@ -344,25 +348,26 @@ async def sync_ticket_payment(
     return "pending", None
 
 
-async def _qualify_referral_after_purchase(pool: asyncpg.Pool, tg_id: int, event) -> None:
-    """Квалифицирует реф-связь при первой покупке бани новичком (этап 17).
+async def _qualify_referral_after_purchase(
+    pool: asyncpg.Pool, bot: Bot, tg_id: int, event, paid_amount
+) -> None:
+    """Квалифицирует реф-связь при первой покупке билета новичком (этапы 17/40).
 
-    Идемпотентно (repo.qualify_referral обновляет только 'pending'). Суммы скидки/
-    бонуса фиксируются на момент покупки. Бонус пригласившему начислит джоб после даты.
+    С этапа 40 работает и для бань, и для ретритов (категория — по виду события),
+    суммы берутся из правил категории, а пригласившему сразу уходит уведомление
+    «начислим ХХХ бонусов после ДД.ММ». Само начисление — джоб после даты события.
     """
-    if event is None or event["kind"] != ev.KIND_BANYA:
+    if event is None:
         return
-    sums = await app_settings.referral_sums(pool)
-    row = await repo.qualify_referral(
-        pool, invitee_tg_id=tg_id, event_id=event["id"],
-        discount_amount=sums["newbie_discount"], bonus_amount=sums["referrer_bonus"],
+    await qualify_and_notify(
+        pool, bot,
+        invitee_tg_id=tg_id,
+        category=ref_rules.category_for_event_kind(event["kind"]),
+        purchase_title=f"билет на «{event['title']}»",
+        paid_amount=paid_amount,
+        event_id=event["id"],
+        event_starts_at=event["starts_at"],
     )
-    if row is not None:
-        logger.info(
-            f"🔗 Реферал квалифицирован: invitee={tg_id}, событие #{event['id']}; "
-            f"бонус {sums['referrer_bonus']} ₽ пригласившему id={row['referrer_tg_id']} "
-            f"после {event['starts_at']:%d.%m.%Y}"
-        )
 
 
 async def _notify_ticket_success(

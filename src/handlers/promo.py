@@ -151,9 +151,16 @@ async def promo_buy(cb: CallbackQuery, bot: Bot, pool: asyncpg.Pool, redis: Redi
         return
 
     await repo.set_fsm_state(pool, cb.from_user.id, "screen:pay:pending")
+    # Скидка новичка оказалась выгоднее промокода (этап 40): скидки не суммируются,
+    # промокод не расходуется — поясняем, чтобы цена не выглядела «не той».
+    note = (
+        f"Скидка новичка по приглашению (<b>−{result['referral_discount']} ₽</b>) "
+        "выгоднее промокода — применили её, промокод остался у тебя."
+        if result.get("referral_instead_of_promo") else ""
+    )
     await _edit(
         cb,
-        texts.pay_created(fmt_price(result["amount"])),
+        texts.pay_created(fmt_price(result["amount"]), note),
         _pay_kb(result["confirmation_url"], result["payment_id"]).as_markup(),
     )
     logger.info(

@@ -19,8 +19,8 @@ import asyncpg
 from .. import keyboards as kb
 from .. import repo, texts
 from ..logger import logger
-from ..services import app_settings
 from ..services import referral as ref
+from ..services import referral_rules as ref_rules
 
 router = Router()
 
@@ -30,9 +30,11 @@ async def _show_link(target: Message, bot: Bot, pool: asyncpg.Pool, tg_id: int) 
     me = await bot.get_me()
     link = ref.deep_link(me.username, code)
     balance = await repo.bonus_balance(pool, tg_id)
-    sums = await app_settings.referral_sums(pool)
+    # Величина скидки — из правила опорной категории (баня); при оформлении
+    # применится величина той категории, которую друг реально покупает (этап 40).
+    rule = await repo.get_referral_rule(pool, ref_rules.CATEGORY_BANYA)
     await target.answer(
-        texts.referral_link_screen(link, balance, sums["newbie_discount"]),
+        texts.referral_link_screen(link, balance, ref_rules.discount_phrase(rule)),
         reply_markup=kb.referral_link_kb(link),
     )
     logger.info(

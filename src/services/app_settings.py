@@ -25,11 +25,12 @@ KEY_SUPPORT_URL = "support_url"
 # Доп-администраторы, добавленные из админки (помимо ADMIN_IDS из .env).
 KEY_EXTRA_ADMINS = "extra_admin_ids"
 
-# Суммы реферальной программы (этап 17), правятся в админке. 1 бонус = 1 ₽.
-KEY_REF_NEWBIE_DISCOUNT = "referral_newbie_discount"  # скидка новичку на первую баню, ₽
-KEY_REF_REFERRER_BONUS = "referral_referrer_bonus"    # бонус пригласившему, ₽
-DEFAULT_NEWBIE_DISCOUNT = 500
-DEFAULT_REFERRER_BONUS = 1000
+# Суммы реферальной программы (этап 17) — УСТАРЕЛИ на этапе 40: суммы задаются
+# по категориям в таблице referral_rules (services.referral_rules). Ключи здесь
+# больше не читаются; строки в bot_settings остались как источник сида миграции
+# 0026_referral_categories и историческое значение.
+KEY_REF_NEWBIE_DISCOUNT = "referral_newbie_discount"  # legacy
+KEY_REF_REFERRER_BONUS = "referral_referrer_bonus"    # legacy
 
 # In-memory кеш доп-админов — чтобы проверка прав (_is_admin) оставалась
 # синхронной, без обращения к БД на каждое действие. Загружается при старте
@@ -68,27 +69,6 @@ async def set_reminder_unit(pool: asyncpg.Pool, unit: str) -> None:
 async def set_reminder_offset(pool: asyncpg.Pool, kind: str, value: int) -> None:
     store_key = _OFFSET_KEYS[kind][0]
     await repo.set_setting(pool, store_key, str(value))
-
-
-async def referral_sums(pool: asyncpg.Pool) -> dict:
-    """Суммы рефералки: {'newbie_discount': int, 'referrer_bonus': int} (этап 17).
-
-    Из bot_settings, недостающее — дефолты 500/1000. Значения в рублях.
-    """
-    stored = await repo.get_settings(
-        pool, [KEY_REF_NEWBIE_DISCOUNT, KEY_REF_REFERRER_BONUS]
-    )
-    raw_d = stored.get(KEY_REF_NEWBIE_DISCOUNT)
-    raw_b = stored.get(KEY_REF_REFERRER_BONUS)
-    return {
-        "newbie_discount": int(raw_d) if raw_d is not None else DEFAULT_NEWBIE_DISCOUNT,
-        "referrer_bonus": int(raw_b) if raw_b is not None else DEFAULT_REFERRER_BONUS,
-    }
-
-
-async def set_referral_sum(pool: asyncpg.Pool, *, newbie_discount: int, referrer_bonus: int) -> None:
-    await repo.set_setting(pool, KEY_REF_NEWBIE_DISCOUNT, str(newbie_discount))
-    await repo.set_setting(pool, KEY_REF_REFERRER_BONUS, str(referrer_bonus))
 
 
 async def support_url(pool: asyncpg.Pool) -> str:

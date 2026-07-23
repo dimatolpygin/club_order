@@ -81,9 +81,12 @@ async def pay_create(
         return
 
     await repo.set_fsm_state(pool, cb.from_user.id, "screen:pay:pending")
+    # Скидка новичка по реф-ссылке (этап 40) — поясняем, откуда цена ниже.
+    ref_discount = result.get("referral_discount") or 0
+    note = f"Скидка новичка по приглашению: <b>−{ref_discount} ₽</b>" if ref_discount else ""
     await _edit(
         cb,
-        texts.pay_created(fmt_price(result["amount"])),
+        texts.pay_created(fmt_price(result["amount"]), note),
         _pay_kb(result["confirmation_url"], result["payment_id"]).as_markup(),
     )
     logger.info(

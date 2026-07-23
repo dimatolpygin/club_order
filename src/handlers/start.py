@@ -10,9 +10,9 @@ import asyncpg
 from .. import keyboards as kb
 from .. import repo, texts
 from ..logger import logger
-from ..services import app_settings
 from ..services import menu
 from ..services import referral as ref
+from ..services import referral_rules as ref_rules
 from ..services import screens
 
 router = Router()
@@ -34,8 +34,8 @@ async def _try_bind_referral(pool: asyncpg.Pool, message: Message, code: str) ->
         return  # скидка новичка — только тем, кто ещё ничего не покупал
     bound = await repo.bind_referral(pool, referrer, invitee)
     if bound is not None:
-        sums = await app_settings.referral_sums(pool)
-        await message.answer(texts.referral_bound(sums["newbie_discount"]))
+        rule = await repo.get_referral_rule(pool, ref_rules.CATEGORY_BANYA)
+        await message.answer(texts.referral_bound(ref_rules.discount_phrase(rule)))
         logger.info(
             f"🔗 Реферал: @{message.from_user.username or '—'} (id:{invitee}) "
             f"привязан к пригласившему id:{referrer} по коду {code}"

@@ -1,8 +1,9 @@
-"""Раздел админки «Реферальная программа» (этап 17).
+"""Раздел админки «Реферальная программа» (этап 17; категории — этап 40).
 
-Настройка сумм (скидка новичку / бонус пригласившему), просмотр цепочек
-приглашений и ручное начисление/списание бонусов. Данные читаем напрямую из
-общего слоя бота (repo) и app_settings — отдельный repo раздела не нужен.
+Настройка правил ПО КАТЕГОРИЯМ покупок (баня, ретрит, подписка, йога,
+консультации): скидка новичку и бонус пригласившему, каждое — суммой в рублях
+или процентом от суммы покупки. Плюс просмотр цепочек приглашений и ручное
+начисление/списание бонусов. Данные читаем напрямую из общего слоя бота (repo).
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from fastapi.responses import RedirectResponse
 from .. import repo
 from ..db import get_pool
 from ..logger import logger
-from ..services import app_settings
+from ..services import referral_rules as ref_rules
 from .deps import current_admin, templates
 
 router = APIRouter()
@@ -20,22 +21,40 @@ router = APIRouter()
 # Человекочитаемые статусы реф-связи.
 STATUS_LABELS = {
     "pending": "Перешёл (ждёт первой покупки)",
-    "qualified": "Купил баню (бонус после события)",
+    "qualified": "Купил (бонус ждёт начисления)",
     "accrued": "Бонус начислен",
     "void": "Аннулирован",
 }
 
 
+async def _rule_rows(pool) -> list[dict]:
+    """Правила всех категорий для формы (недостающие строки — дефолтами сервиса)."""
+    stored = await repo.get_referral_rules(pool)
+    rows: list[dict] = []
+    for category in ref_rules.CATEGORIES:
+        r = stored.get(category)
+        rows.append({
+            "category": category,
+            "label": ref_rules.category_label(category),
+            "discount_kind": r["discount_kind"] if r else ref_rules.KIND_FIXED,
+            "discount_value": int(r["discount_value"]) if r else ref_rules.DEFAULT_DISCOUNT,
+            "bonus_kind": r["bonus_kind"] if r else ref_rules.KIND_FIXED,
+            "bonus_value": int(r["bonus_value"]) if r else ref_rules.DEFAULT_BONUS,
+        })
+    return rows
+
+
 async def _render(request: Request, *, error: str | None = None, ok: str | None = None,
                   status: int = 200):
     pool = get_pool()
-    sums = await app_settings.referral_sums(pool)
     chains = await repo.get_referral_chains(pool)
     return templates.TemplateResponse(
         request, "referral.html",
         {
             "active": "referral", "admin": request.session.get("admin"),
-            "sums": sums, "chains": chains, "status_labels": STATUS_LABELS,
+            "rules": await _rule_rows(pool),
+            "kinds": [(k, ref_rules.KIND_LABELS[k]) for k in ref_rules.KINDS],
+            "chains": chains, "status_labels": STATUS_LABELS,
             "error": error, "ok": ok,
         },
         status_code=status,
@@ -49,23 +68,46 @@ async def referral_page(request: Request):
 
 
 @router.post("/referral/settings")
-async def referral_settings(
-    request: Request,
-    newbie_discount: str = Form(...),
-    referrer_bonus: str = Form(...),
-):
+async def referral_settings(request: Request):
+    """Сохраняет правила всех категорий одной формой (этап 40)."""
     current_admin(request)
-    try:
-        d = int((newbie_discount or "").strip())
-        b = int((referrer_bonus or "").strip())
-    except ValueError:
-        return await _render(request, error="Суммы должны быть целыми числами.", status=400)
-    if d < 0 or b < 0:
-        return await _render(request, error="Суммы не могут быть отрицательными.", status=400)
+    form = await request.form()
+    parsed: list[dict] = []
+    for category in ref_rules.CATEGORIES:
+        label = ref_rules.category_label(category)
+        try:
+            dv = int((form.get(f"discount_value_{category}") or "0").strip() or 0)
+            bv = int((form.get(f"bonus_value_{category}") or "0").strip() or 0)
+        except ValueError:
+            return await _render(
+                request, error=f"«{label}»: величины должны быть целыми числами.", status=400
+            )
+        if dv < 0 or bv < 0:
+            return await _render(
+                request, error=f"«{label}»: величины не могут быть отрицательными.", status=400
+            )
+        dk = ref_rules.normalize_kind(form.get(f"discount_kind_{category}"))
+        bk = ref_rules.normalize_kind(form.get(f"bonus_kind_{category}"))
+        if (dk == ref_rules.KIND_PERCENT and dv > 100) or (
+            bk == ref_rules.KIND_PERCENT and bv > 100
+        ):
+            return await _render(
+                request, error=f"«{label}»: процент не может быть больше 100.", status=400
+            )
+        parsed.append({
+            "category": category, "discount_kind": dk, "discount_value": dv,
+            "bonus_kind": bk, "bonus_value": bv,
+        })
+
     pool = get_pool()
-    await app_settings.set_referral_sum(pool, newbie_discount=d, referrer_bonus=b)
-    logger.info("Админка: суммы рефералки обновлены — скидка {} ₽, бонус {} ₽", d, b)
-    return await _render(request, ok="Суммы сохранены.")
+    for p in parsed:
+        await repo.upsert_referral_rule(
+            pool, p["category"],
+            discount_kind=p["discount_kind"], discount_value=p["discount_value"],
+            bonus_kind=p["bonus_kind"], bonus_value=p["bonus_value"],
+        )
+    logger.info("Админка: правила рефералки обновлены ({} категорий)", len(parsed))
+    return await _render(request, ok="Суммы по категориям сохранены.")
 
 
 @router.post("/referral/bonus")

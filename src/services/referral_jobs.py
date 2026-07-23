@@ -10,29 +10,35 @@ from __future__ import annotations
 import asyncpg
 from aiogram import Bot
 
-from .. import repo
+from .. import repo, texts
 from ..logger import logger
 
 
 async def run_referral_accrual(pool: asyncpg.Pool, bot: Bot) -> None:
-    """Начисляет бонусы по связям, у которых дата события прошла. Уведомляет пригласивших."""
+    """Начисляет бонусы по связям, у которых наступил момент начисления.
+
+    С этапа 40 момент берётся из `referrals.accrue_after`: для билетов это дата
+    события (как было), для покупок без даты — момент оплаты. Последние обычно уже
+    начислены сразу (services.referral_notify), но джоб остаётся подстраховкой —
+    начисление идемпотентно.
+    """
     due = await repo.referrals_due_for_accrual(pool)
     for r in due:
         ref = await repo.accrue_referral_bonus(pool, r["id"])
         if ref is None:
             continue  # уже начислено/изменилось параллельно
         bonus = int(r["bonus_amount"] or 0)
+        # title есть только у связей, квалифицированных билетом (LEFT JOIN events).
+        title = r["title"]
         logger.info(
             f"💰 Реф-бонус начислен: пригласившему id={r['referrer_tg_id']} +{bonus} ₽ "
-            f"за «{r['title']}» (связь #{r['id']})"
+            f"за «{title or r['category'] or 'покупку'}» (связь #{r['id']})"
         )
+        if bonus <= 0:
+            continue
         try:
             await bot.send_message(
-                r["referrer_tg_id"],
-                f"<b>Тебе начислены бонусы</b>\n\n"
-                f"Друг, которого ты пригласил, сходил на «{r['title']}». "
-                f"Тебе начислено <b>{bonus} ₽</b> бонусами — можно потратить на билет "
-                f"на баню (до 50% стоимости).",
+                r["referrer_tg_id"], texts.referral_bonus_accrued(title, bonus)
             )
         except Exception as e:  # noqa: BLE001 — пользователь мог заблокировать бота
             logger.warning(f"Не удалось уведомить о реф-бонусе id={r['referrer_tg_id']}: {e}")

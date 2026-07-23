@@ -12,16 +12,51 @@
 {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
 {% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
 
-<h2 class="section-title">Суммы (бани)</h2>
-<form method="post" action="/referral/settings" class="card form-grid">
-  <label>Скидка новичку, ₽
-    <input type="number" name="newbie_discount" min="0" step="1" value="{{ sums.newbie_discount }}">
-    <small class="muted">Скидка на первый билет на баню тому, кто пришёл по ссылке и ещё ничего не покупал.</small>
-  </label>
-  <label>Бонус пригласившему, ₽
-    <input type="number" name="referrer_bonus" min="0" step="1" value="{{ sums.referrer_bonus }}">
-    <small class="muted">Начисляется после даты бани. 1 бонус = 1 ₽, оплатить можно до 50% билета.</small>
-  </label>
+<h2 class="section-title">Суммы по категориям</h2>
+<form method="post" action="/referral/settings" class="card">
+  <p class="muted">
+    Скидка новичку — тому, кто пришёл по ссылке и ещё ничего не покупал (на первую покупку).
+    Бонус пригласившему — за покупку друга. Значение можно задать суммой в рублях
+    или процентом от суммы покупки. 1 бонус = 1 ₽, оплатить бонусами можно до 50% покупки.
+    За билет (баня, ретрит) бонус начисляется после даты события, за подписку, йогу
+    и консультации — сразу после оплаты.
+  </p>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Категория</th>
+          <th>Скидка новичку</th>
+          <th>Бонус пригласившему</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rules %}
+        <tr>
+          <td><b>{{ r.label }}</b></td>
+          <td>
+            <input type="number" name="discount_value_{{ r.category }}" min="0" step="1"
+                   value="{{ r.discount_value }}" style="max-width:8rem">
+            <select name="discount_kind_{{ r.category }}">
+              {% for k, kl in kinds %}
+              <option value="{{ k }}"{% if r.discount_kind == k %} selected{% endif %}>{{ kl }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <input type="number" name="bonus_value_{{ r.category }}" min="0" step="1"
+                   value="{{ r.bonus_value }}" style="max-width:8rem">
+            <select name="bonus_kind_{{ r.category }}">
+              {% for k, kl in kinds %}
+              <option value="{{ k }}"{% if r.bonus_kind == k %} selected{% endif %}>{{ kl }}</option>
+              {% endfor %}
+            </select>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   <div><button type="submit" class="btn btn-primary">Сохранить суммы</button></div>
 </form>
 

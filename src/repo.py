@@ -1741,20 +1741,26 @@ async def bind_referral(
 
 
 async def qualify_referral(
-    pool: asyncpg.Pool, *, invitee_tg_id: int, event_id: int,
+    pool: asyncpg.Pool, *, invitee_tg_id: int, event_id: int | None,
     discount_amount: int, bonus_amount: int,
+    category: str, accrue_after: datetime | None,
 ) -> asyncpg.Record | None:
-    """Квалифицирует связь при первой покупке бани новичком (pending → qualified).
+    """Квалифицирует связь при первой покупке новичка (pending → qualified), этап 40.
 
     Идемпотентно: обновляет только связь в статусе 'pending'. Суммы фиксируются
-    на момент покупки (последующая правка дефолтов задним числом не влияет).
-    Возвращает обновлённую строку или None (связи нет / уже квалифицирована).
+    на момент покупки (последующая правка правил задним числом не влияет).
+    `category` — категория покупки (banya/retreat/subscription/yoga/consult);
+    `event_id` — только для билетов (иначе NULL); `accrue_after` — момент, с
+    которого бонус можно начислять (дата события для билета, now() для покупок
+    без даты). Возвращает обновлённую строку или None (связи нет / уже
+    квалифицирована).
     """
     return await pool.fetchrow(
         """
         UPDATE referrals
         SET status = 'qualified', event_id = $2,
-            discount_amount = $3, bonus_amount = $4, qualified_at = now()
+            discount_amount = $3, bonus_amount = $4, qualified_at = now(),
+            category = $5, accrue_after = $6
         WHERE invitee_tg_id = $1 AND status = 'pending'
         RETURNING *
         """,
@@ -1762,6 +1768,47 @@ async def qualify_referral(
         event_id,
         Decimal(discount_amount),
         Decimal(bonus_amount),
+        category,
+        accrue_after,
+    )
+
+
+# ── Правила реф-программы по категориям (этап 40) ─────────────────────────────
+async def get_referral_rules(pool: asyncpg.Pool) -> dict[str, asyncpg.Record]:
+    """Все правила реф-программы: {category: строка referral_rules}."""
+    rows = await pool.fetch("SELECT * FROM referral_rules")
+    return {r["category"]: r for r in rows}
+
+
+async def get_referral_rule(pool: asyncpg.Pool, category: str) -> asyncpg.Record | None:
+    """Правило одной категории (None — строки нет, применяются дефолты сервиса)."""
+    return await pool.fetchrow(
+        "SELECT * FROM referral_rules WHERE category = $1", category
+    )
+
+
+async def upsert_referral_rule(
+    pool: asyncpg.Pool, category: str, *,
+    discount_kind: str, discount_value: int, bonus_kind: str, bonus_value: int,
+) -> None:
+    """Сохраняет правило категории из веб-админки (тип значения + величина)."""
+    await pool.execute(
+        """
+        INSERT INTO referral_rules(category, discount_kind, discount_value,
+                                   bonus_kind, bonus_value, updated_at)
+        VALUES($1, $2, $3, $4, $5, now())
+        ON CONFLICT (category) DO UPDATE
+        SET discount_kind = EXCLUDED.discount_kind,
+            discount_value = EXCLUDED.discount_value,
+            bonus_kind = EXCLUDED.bonus_kind,
+            bonus_value = EXCLUDED.bonus_value,
+            updated_at = now()
+        """,
+        category,
+        discount_kind,
+        Decimal(discount_value),
+        bonus_kind,
+        Decimal(bonus_value),
     )
 
 
@@ -1871,22 +1918,30 @@ async def accrue_referral_bonus(
 
 
 async def referrals_due_for_accrual(pool: asyncpg.Pool) -> list[asyncpg.Record]:
-    """Квалифицированные связи, у которых дата события уже прошла — кандидаты на бонус.
+    """Квалифицированные связи, у которых наступил момент начисления (этап 40).
 
-    Анти-возврат: бонус положен, только если билет приглашённого на это событие всё
-    ещё оплачен (не возвращён). Дату события берём из events.
+    Момент — `accrue_after`: для билетов это дата события (как было до этапа 40,
+    COALESCE со `starts_at` подстраховывает строки без бэкфилла), для покупок без
+    даты (подписка/йога/консультации) — момент оплаты, т.е. сразу.
+
+    Анти-возврат: для билета бонус положен, только если билет приглашённого всё
+    ещё оплачен (не возвращён). К покупкам без события проверка неприменима.
     """
     return await pool.fetch(
         """
         SELECT r.id, r.referrer_tg_id, r.invitee_tg_id, r.event_id, r.bonus_amount,
-               e.starts_at, e.title
+               r.category, r.accrue_after, e.starts_at, e.title
         FROM referrals r
-        JOIN events e ON e.id = r.event_id
-        WHERE r.status = 'qualified' AND e.starts_at <= now()
-          AND EXISTS(
-              SELECT 1 FROM tickets t
-              WHERE t.tg_id = r.invitee_tg_id AND t.event_id = r.event_id
-                AND t.status = 'paid'
+        LEFT JOIN events e ON e.id = r.event_id
+        WHERE r.status = 'qualified'
+          AND COALESCE(r.accrue_after, e.starts_at) <= now()
+          AND (
+              r.event_id IS NULL
+              OR EXISTS(
+                  SELECT 1 FROM tickets t
+                  WHERE t.tg_id = r.invitee_tg_id AND t.event_id = r.event_id
+                    AND t.status = 'paid'
+              )
           )
         ORDER BY r.id
         """

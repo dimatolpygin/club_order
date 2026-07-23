@@ -25,9 +25,36 @@ from ..config import settings
 from ..logger import logger
 from ..utils import fmt_price
 from . import promo as promo_service
+from . import referral_rules as ref_rules
 from . import tariffs
 from .receipt import build_receipt
+from .referral_notify import qualify_and_notify
 from .yookassa import YooKassaError, create_payment, get_payment, new_idempotence_key
+
+# ЮKassa не принимает платёж на 0 ₽ — реф-скидка не может увести сумму ниже.
+MIN_PAYMENT_AMOUNT = Decimal("1.00")
+
+
+async def _referral_discount_for_subscription(
+    pool: asyncpg.Pool, tg_id: int, base_amount: Decimal
+) -> int:
+    """Скидка новичка по реф-ссылке на подписку, ₽ (0 — неприменимо), этап 40.
+
+    Условия те же, что для билетов: пользователь привязан как приглашённый, связь
+    ещё 'pending' (первая покупка), он всё ещё новичок. Величина — из правила
+    категории 'subscription' (фиксированная сумма или процент от цены периода).
+    Ограничиваем так, чтобы к оплате осталось не меньше 1 ₽: полностью бесплатную
+    подписку выдаёт промокод, а не рефералка.
+    """
+    refr = await repo.get_referral_by_invitee(pool, tg_id)
+    if refr is None or refr["status"] != "pending":
+        return 0
+    if not await repo.is_newbie(pool, tg_id):
+        return 0
+    rule = await repo.get_referral_rule(pool, ref_rules.CATEGORY_SUBSCRIPTION)
+    discount = ref_rules.discount_for(rule, base_amount)
+    ceiling = int(max(Decimal(str(base_amount)) - MIN_PAYMENT_AMOUNT, Decimal(0)))
+    return min(discount, ceiling)
 
 
 async def start_payment(
@@ -51,6 +78,11 @@ async def start_payment(
     # от ставка×значение. Фиксируем за пользователем именно МЕСЯЧНУЮ ставку (monthly)
     # — по ней пойдут продления; итоговая сумма покупки берётся из матрицы.
     amount = await tariffs.period_price(pool, redis, tier, months, unit)
+    # Скидка новичка по реф-ссылке (этап 40): разовая, зафиксированную ставку
+    # (monthly) не трогает — по ней пойдут продления уже без скидки.
+    ref_discount = await _referral_discount_for_subscription(pool, tg_id, amount)
+    if ref_discount:
+        amount = amount - Decimal(ref_discount)
     user = await repo.get_user(pool, tg_id)
     description = f"Подписка в клуб «11:11» — {texts.period_phrase(months, unit)}"
     receipt = build_receipt(user, description, amount)
@@ -85,9 +117,10 @@ async def start_payment(
         status=payment.get("status", "pending"),
         unit=unit,
     )
+    ref_note = f", скидка новичка −{ref_discount} ₽" if ref_discount else ""
     logger.info(
         f"💳 Платёж создан: tg_id={tg_id}, {fmt_price(monthly)} ₽/мес × "
-        f"{texts.period_phrase(months, unit)} = {fmt_price(amount)} ₽, yk_id={yk_id}"
+        f"{texts.period_phrase(months, unit)} = {fmt_price(amount)} ₽{ref_note}, yk_id={yk_id}"
     )
     return {
         "payment_id": yk_id,
@@ -95,6 +128,7 @@ async def start_payment(
         "amount": amount,
         "monthly": monthly,
         "months": months,
+        "referral_discount": ref_discount,
     }
 
 
@@ -212,8 +246,18 @@ async def start_promo_payment(
     if amount <= 0:
         return "no_tier", None  # страховка: админ-валидация не даёт нулевую сумму
 
+    # Скидка новичка по реф-ссылке и промокод НЕ суммируются — берём ту, что даёт
+    # меньшую сумму (этапы 16/40). Если выигрывает рефералка, промокод НЕ расходуем
+    # (останется у пользователя на будущее) и ставку фиксируем обычную, не спец.
+    ref_discount = await _referral_discount_for_subscription(pool, tg_id, period)
+    use_referral = ref_discount > 0 and (period - Decimal(ref_discount)) < amount
+    if use_referral:
+        amount = period - Decimal(ref_discount)
+
     user = await repo.get_user(pool, tg_id)
     description = (
+        f"Подписка в клуб «11:11» — {texts.period_phrase(months, unit)}"
+        if use_referral else
         f"Подписка в клуб «11:11» по промокоду {promo['code']} — "
         f"{texts.period_phrase(months, unit)}"
     )
@@ -225,8 +269,9 @@ async def start_promo_payment(
         "months": str(months),
         "unit": unit,
         "duration_id": str(duration_id),
-        "promo_id": str(promo_id),
     }
+    if not use_referral:
+        metadata["promo_id"] = str(promo_id)
     payment = await create_payment(
         amount=amount,
         description=description,
@@ -244,24 +289,32 @@ async def start_promo_payment(
         tg_id=tg_id,
         tier_id=tier["id"],
         months=months,
-        fixed_price=pricing["fixed_price"],
+        fixed_price=tier_monthly if use_referral else pricing["fixed_price"],
         amount=amount,
         confirmation_url=confirmation_url,
         status=payment.get("status", "pending"),
         unit=unit,
-        promo_id=promo_id,
+        promo_id=None if use_referral else promo_id,
     )
-    logger.info(
-        f"💳 Платёж по промокоду {promo['code']} создан: tg_id={tg_id}, "
-        f"спец {fmt_price(pricing['special_monthly'])} ₽/мес × "
-        f"{texts.period_phrase(months, unit)} = {fmt_price(amount)} ₽, yk_id={yk_id}"
-    )
+    if use_referral:
+        logger.info(
+            f"💳 Платёж создан со скидкой новичка (выгоднее промокода {promo['code']}): "
+            f"tg_id={tg_id}, −{ref_discount} ₽ = {fmt_price(amount)} ₽, yk_id={yk_id}"
+        )
+    else:
+        logger.info(
+            f"💳 Платёж по промокоду {promo['code']} создан: tg_id={tg_id}, "
+            f"спец {fmt_price(pricing['special_monthly'])} ₽/мес × "
+            f"{texts.period_phrase(months, unit)} = {fmt_price(amount)} ₽, yk_id={yk_id}"
+        )
     return "ok", {
         "payment_id": yk_id,
         "confirmation_url": confirmation_url,
         "amount": amount,
         "special_monthly": pricing["special_monthly"],
         "months": months,
+        "referral_instead_of_promo": use_referral,
+        "referral_discount": ref_discount if use_referral else 0,
     }
 
 
@@ -299,6 +352,17 @@ async def sync_payment(
                 f"yk_id={yk_id})"
             )
             await _notify_success(bot, payment["tg_id"], sub)
+            # Первая покупка подписки новичком квалифицирует реф-связь (этап 40).
+            # У подписки нет даты события → бонус пригласившему начисляется сразу.
+            # Продление не трогаем: связь к тому моменту давно не 'pending'.
+            if payment["kind"] != "renewal":
+                await qualify_and_notify(
+                    pool, bot,
+                    invitee_tg_id=payment["tg_id"],
+                    category=ref_rules.CATEGORY_SUBSCRIPTION,
+                    purchase_title="подписку в клуб «11:11»",
+                    paid_amount=payment["amount"],
+                )
         return "succeeded", sub
 
     if status in ("canceled", "cancelled"):
