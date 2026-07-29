@@ -60,9 +60,16 @@ def due_reminder_kinds(
     return eligible, to_send
 
 
-def _render(kind: str, row: asyncpg.Record, now: datetime) -> tuple[str, object]:
-    """Текст и клавиатура для конкретного типа напоминания."""
-    price = fmt_price(row["fixed_price"])
+def _render(
+    kind: str, row: asyncpg.Record, now: datetime, renewal_rate: object
+) -> tuple[str, object]:
+    """Текст и клавиатура для конкретного типа напоминания.
+
+    Цена в напоминании — текущая цена продления (этап 43); если она не задана,
+    падаем на зафиксированную ставку подписки.
+    """
+    monthly = renewal_rate if renewal_rate and renewal_rate > 0 else row["fixed_price"]
+    price = fmt_price(monthly)
     if kind == "early":
         remaining = texts.remaining_phrase(row["end_date"], now, row["unit"])
         return (
@@ -79,6 +86,8 @@ async def run_reminder_check(pool: asyncpg.Pool, bot: Bot) -> None:
     cfg = await app_settings.reminder_config(pool)  # читаем на лету (правится в админке)
     unit_seconds = _UNIT_SECONDS.get(cfg["unit"], _UNIT_SECONDS["day"])
     offsets = cfg["offsets"]
+    # Текущая цена продления (этап 43) — одна на весь проход, показываем в тексте.
+    renewal_rate = (await app_settings.subscription_prices(pool))["renewal"]
     now = datetime.now(timezone.utc)
 
     rows = await repo.get_subscriptions_for_reminders(pool)
@@ -97,7 +106,7 @@ async def run_reminder_check(pool: asyncpg.Pool, bot: Bot) -> None:
             claimed = await repo.claim_reminder(pool, row["id"], kind)
             if kind != to_send or not claimed:
                 continue
-            text, markup = _render(kind, row, now)
+            text, markup = _render(kind, row, now, renewal_rate)
             with suppress(Exception):  # пользователь мог заблокировать бота
                 await bot.send_message(row["tg_id"], text, reply_markup=markup)
                 logger.info(

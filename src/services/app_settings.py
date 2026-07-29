@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+
 import asyncpg
 
 from .. import repo
@@ -24,6 +26,10 @@ KEY_SUPPORT_URL = "support_url"
 
 # Доп-администраторы, добавленные из админки (помимо ADMIN_IDS из .env).
 KEY_EXTRA_ADMINS = "extra_admin_ids"
+
+# Две цены подписки (₽/мес), этап 43 — вместо ступеней по местам.
+KEY_SUB_ENTRY = "subscription_entry_price"      # цена входа (новичок / после перерыва)
+KEY_SUB_RENEWAL = "subscription_renewal_price"  # цена продления (непрерывный подписчик)
 
 # Суммы реферальной программы (этап 17) — УСТАРЕЛИ на этапе 40: суммы задаются
 # по категориям в таблице referral_rules (services.referral_rules). Ключи здесь
@@ -79,6 +85,36 @@ async def support_url(pool: asyncpg.Pool) -> str:
 
 async def set_support_url(pool: asyncpg.Pool, url: str) -> None:
     await repo.set_setting(pool, KEY_SUPPORT_URL, url)
+
+
+# ── Две цены подписки (этап 43) ───────────────────────────────────────────────
+def _to_price(raw: str | None) -> Decimal:
+    """Строка из bot_settings → Decimal. Пусто/мусор → 0 (цена не задана)."""
+    if not raw:
+        return Decimal(0)
+    try:
+        return Decimal(str(raw))
+    except InvalidOperation:
+        return Decimal(0)
+
+
+async def subscription_prices(pool: asyncpg.Pool) -> dict[str, Decimal]:
+    """Текущие цены входа и продления (₽/мес) из bot_settings.
+
+    Возвращает {'entry': Decimal, 'renewal': Decimal}. Отсутствующий ключ → 0
+    (после миграции 0027 оба ключа засеяны, поэтому в проде оба > 0).
+    """
+    stored = await repo.get_settings(pool, [KEY_SUB_ENTRY, KEY_SUB_RENEWAL])
+    return {
+        "entry": _to_price(stored.get(KEY_SUB_ENTRY)),
+        "renewal": _to_price(stored.get(KEY_SUB_RENEWAL)),
+    }
+
+
+async def set_subscription_price(pool: asyncpg.Pool, kind: str, value: Decimal) -> None:
+    """Сохранить цену входа ('entry') или продления ('renewal')."""
+    key = KEY_SUB_ENTRY if kind == "entry" else KEY_SUB_RENEWAL
+    await repo.set_setting(pool, key, str(value))
 
 
 # ── Доп-администраторы ────────────────────────────────────────────────────────

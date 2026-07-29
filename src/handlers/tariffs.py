@@ -73,8 +73,8 @@ async def show_tariffs(cb: CallbackQuery, pool: asyncpg.Pool, redis: Redis) -> N
     b.row(InlineKeyboardButton(text="Назад", callback_data=kb.NAV_START))
     await _edit(cb, texts.tariff_choose(fmt_price(monthly)), b.as_markup())
     logger.info(
-        f"🤖 Бот → @{cb.from_user.username or '—'}: подписка, ставка {fmt_price(monthly)} ₽/мес "
-        f"(ступень #{tier['tier_index']}), {len(durations)} длит."
+        f"🤖 Бот → @{cb.from_user.username or '—'}: подписка, цена входа {fmt_price(monthly)} ₽/мес, "
+        f"{len(durations)} длит."
     )
 
 

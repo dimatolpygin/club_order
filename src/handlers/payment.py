@@ -23,6 +23,7 @@ from .. import repo, texts
 from ..config import settings
 from ..logger import logger
 from ..services import payments
+from ..services import tariffs
 from ..services.yookassa import YooKassaError
 from ..utils import fmt_price
 
@@ -150,7 +151,10 @@ async def nav_renew(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await repo.set_fsm_state(pool, cb.from_user.id, "screen:renew")
     durations = await repo.get_active_durations(pool)
-    monthly = sub["fixed_price"]
+    # Цена продления — текущая (этап 43), не зафиксированная когда-то ставка.
+    monthly = await tariffs.renewal_rate(pool)
+    if monthly <= 0:
+        monthly = sub["fixed_price"]  # страховка: цена продления не задана
     await _edit(cb, texts.renew_choose(fmt_price(monthly)), _renew_kb(durations, monthly))
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: продление, ставка "

@@ -141,12 +141,14 @@ async def start_renewal(
     duration_id: int,
     return_url: str,
 ) -> dict | None:
-    """Создаёт платёж-продление по ЗАФИКСИРОВАННОЙ ставке активной подписки.
+    """Создаёт платёж-продление по текущей цене ПРОДЛЕНИЯ (этап 43).
 
-    В отличие от первичной покупки, цена считается строго как
-    зафиксированная_ставка × месяцы (матрица tier_prices — это «текущее»
-    ценообразование, а продление сохраняет ставку). tier_id и ставка берутся из
-    активной подписки. None — если активной подписки/длительности нет.
+    Со ступеней по местам ушли к двум ценам: непрерывный подписчик продлевается
+    по актуальной цене продления (не по зафиксированной когда-то ставке — так
+    существующие подписки не дорожают/не ломаются, а следуют новой цене). Сумма =
+    цена_продления × месяцы. tier_id больше не привязан к ступени (NULL). None —
+    если активной подписки/длительности нет. Страховка: если цена продления не
+    задана (0), падаем на прежнюю зафиксированную ставку, чтобы не выставить 0 ₽.
     """
     sub = await repo.get_active_subscription(pool, tg_id)
     duration = await repo.get_duration(pool, duration_id)
@@ -155,7 +157,9 @@ async def start_renewal(
 
     months: int = duration["months"]
     unit: str = duration["unit"]
-    monthly: Decimal = sub["fixed_price"]
+    monthly: Decimal = await tariffs.renewal_rate(pool)
+    if monthly <= 0:
+        monthly = sub["fixed_price"]
     amount = monthly * months
     user = await repo.get_user(pool, tg_id)
     description = f"Продление подписки в клуб «11:11» — {texts.period_phrase(months, unit)}"
@@ -163,7 +167,7 @@ async def start_renewal(
     idem = new_idempotence_key()
     metadata = {
         "tg_id": str(tg_id),
-        "tier_id": str(sub["tier_id"]) if sub["tier_id"] is not None else "",
+        "tier_id": "",  # ступеней больше нет (этап 43)
         "months": str(months),
         "unit": unit,
         "duration_id": str(duration_id),
@@ -184,7 +188,7 @@ async def start_renewal(
         yookassa_payment_id=yk_id,
         idempotence_key=idem,
         tg_id=tg_id,
-        tier_id=sub["tier_id"],
+        tier_id=None,
         months=months,
         fixed_price=monthly,
         amount=amount,

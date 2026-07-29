@@ -1,9 +1,14 @@
-"""Сервис тарифов: доступные ступени и длительности для экрана выбора.
+"""Сервис тарифов: цена входа/продления и длительности для экрана выбора (этап 43).
 
-Определения ступеней/длительностей (цена, лимит, активность) кешируются в Redis
-и инвалидируются при правке админом — поэтому изменения видны без рестарта.
-Занятые места считаются ЖИВЫМ запросом при каждом рендере (меняются при оплатах),
-поэтому в кеш не попадают.
+С этапа 43 авто-ступени по числу занятых мест УБРАНЫ. Остаются две цены (₽/мес),
+которые админ правит в веб-админке (хранятся в bot_settings):
+  · вход      — для новичка и после перерыва (get_current_tier / entry_rate);
+  · продление — для непрерывного подписчика (renewal_rate).
+Регулировка стоимости для первых участников — промокодами (этап 7).
+
+Длительности (1/3/6/12 мес и др.) кешируются в Redis и инвалидируются при правке
+админом — поэтому изменения видны без рестарта. Цена за срок = ставка × число
+периодов (матрица цен-за-период ступеней больше не применяется).
 """
 from __future__ import annotations
 
@@ -14,30 +19,14 @@ import asyncpg
 from redis.asyncio import Redis
 
 from .. import repo
+from . import app_settings
 
-_TIERS_KEY = "cache:tiers"
 _DURATIONS_KEY = "cache:durations"
+# Legacy-ключи ступеней/матрицы (этапы 2–23): движок их больше не пишет, но
+# invalidate() чистит их, чтобы старые записи в Redis не «всплыли».
+_TIERS_KEY = "cache:tiers"
 _PRICES_KEY = "cache:tier_prices"
 _TTL = 300  # сек
-
-
-async def _cached_active_tiers(pool: asyncpg.Pool, redis: Redis) -> list[dict]:
-    raw = await redis.get(_TIERS_KEY)
-    if raw is not None:
-        return json.loads(raw)
-    rows = await repo.get_active_tiers(pool)
-    tiers = [
-        {
-            "id": r["id"],
-            "name": r["name"],
-            "monthly_price": str(r["monthly_price"]),  # Decimal → str для JSON
-            "seat_limit": r["seat_limit"],
-            "sort_order": r["sort_order"],
-        }
-        for r in rows
-    ]
-    await redis.set(_TIERS_KEY, json.dumps(tiers), ex=_TTL)
-    return tiers
 
 
 async def _cached_active_durations(pool: asyncpg.Pool, redis: Redis) -> list[dict]:
@@ -52,42 +41,25 @@ async def _cached_active_durations(pool: asyncpg.Pool, redis: Redis) -> list[dic
     return durations
 
 
-def _period_key(value: int, unit: str) -> str:
-    return f"{value}:{unit}"
-
-
-async def _cached_tier_prices(pool: asyncpg.Pool, redis: Redis) -> dict[str, dict[str, str]]:
-    """Матрица переопределений цены: {tier_id: {"значение:единица": price}} (строки для JSON)."""
-    raw = await redis.get(_PRICES_KEY)
-    if raw is not None:
-        return json.loads(raw)
-    rows = await repo.get_all_tier_prices(pool)
-    matrix: dict[str, dict[str, str]] = {}
-    for r in rows:
-        matrix.setdefault(str(r["tier_id"]), {})[
-            _period_key(r["months"], r["unit"])
-        ] = str(r["price"])
-    await redis.set(_PRICES_KEY, json.dumps(matrix), ex=_TTL)
-    return matrix
-
-
 async def invalidate(redis: Redis) -> None:
-    """Сбросить кеш тарифов/длительностей/цен (вызывать после правки админом)."""
-    await redis.delete(_TIERS_KEY, _DURATIONS_KEY, _PRICES_KEY)
+    """Сбросить кеш длительностей (вызывать после правки админом)."""
+    await redis.delete(_DURATIONS_KEY, _TIERS_KEY, _PRICES_KEY)
+
+
+async def entry_rate(pool: asyncpg.Pool) -> Decimal:
+    """Цена входа (₽/мес): новичок / после перерыва. 0 — если не задана."""
+    return (await app_settings.subscription_prices(pool))["entry"]
+
+
+async def renewal_rate(pool: asyncpg.Pool) -> Decimal:
+    """Цена продления (₽/мес): непрерывный подписчик. 0 — если не задана."""
+    return (await app_settings.subscription_prices(pool))["renewal"]
 
 
 async def period_price(
     pool: asyncpg.Pool, redis: Redis, tier: dict, value: int, unit: str = "month"
 ) -> Decimal:
-    """Цена за период внутри ступени: переопределение из матрицы или ставка×значение.
-
-    Для немесячных единиц (день/час/минута) админ обычно задаёт цену явно;
-    fallback ставка×значение — лишь страховка, чтобы покупка не блокировалась.
-    """
-    matrix = await _cached_tier_prices(pool, redis)
-    override = matrix.get(str(tier["id"]), {}).get(_period_key(value, unit))
-    if override is not None:
-        return Decimal(override)
+    """Цена за период: ставка × число периодов (этап 43 — без матрицы ступеней)."""
     return tier["monthly_price"] * value
 
 
@@ -95,51 +67,22 @@ async def prices_for(
     pool: asyncpg.Pool, redis: Redis, tier: dict, durations: list[dict]
 ) -> dict[int, Decimal]:
     """Цены за набор длительностей одним проходом → {duration_id: price}."""
-    matrix = await _cached_tier_prices(pool, redis)
-    overrides = matrix.get(str(tier["id"]), {})
-    result: dict[int, Decimal] = {}
-    for d in durations:
-        ov = overrides.get(_period_key(d["months"], d["unit"]))
-        result[d["id"]] = (
-            Decimal(ov) if ov is not None else tier["monthly_price"] * d["months"]
-        )
-    return result
+    return {d["id"]: tier["monthly_price"] * d["months"] for d in durations}
 
 
 async def get_current_tier(pool: asyncpg.Pool, redis: Redis) -> dict | None:
-    """Текущая ценовая ступень — определяется числом уже занятых мест в клубе.
+    """«Ступень» входа для нового участника (этап 43 — без счёта мест).
 
-    Ступени-брекеты идут по порядку с кумулятивными лимитами:
-    места 1..L1 → ступень 1, L1+1..L1+L2 → ступень 2, и т.д.
-    Ступень с seat_limit=NULL («Стандарт») ловит всех сверх лимитов.
-    Возвращает {id, name, monthly_price(Decimal), tier_index} или None,
-    если все лимитные ступени заполнены и безлимитной нет.
-    Ступени пользователю НЕ показываются — это внутренний механизм цены.
+    Ступени по местам убраны: новичок всегда платит цену ВХОДА. Возвращаем
+    синтетическую ступень {id, name, monthly_price(Decimal), tier_index} с ценой
+    входа; id=None (в payments/subscriptions tier_id nullable — «промо/кастом»).
+    None — только если цена входа не задана (≤0): экран «мест нет» тогда страхует
+    от продажи по нулю.
     """
-    tiers = await _cached_active_tiers(pool, redis)
-    if not tiers:
+    rate = await entry_rate(pool)
+    if rate <= 0:
         return None
-    taken = await repo.count_active_members(pool)
-
-    cumulative = 0
-    for idx, t in enumerate(tiers, start=1):
-        limit = t["seat_limit"]
-        if limit is None:
-            # Безлимитная ступень — текущая для всех, кто за пределами брекетов.
-            return _to_tier(t, idx)
-        cumulative += limit
-        if taken < cumulative:
-            return _to_tier(t, idx)
-    return None  # все лимитные ступени заполнены, безлимитной нет
-
-
-def _to_tier(t: dict, idx: int) -> dict:
-    return {
-        "id": t["id"],
-        "name": t["name"],
-        "monthly_price": Decimal(t["monthly_price"]),
-        "tier_index": idx,
-    }
+    return {"id": None, "name": "Клуб 11:11", "monthly_price": rate, "tier_index": 1}
 
 
 async def get_active_durations(pool: asyncpg.Pool, redis: Redis) -> list[dict]:
