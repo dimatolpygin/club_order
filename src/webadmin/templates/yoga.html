@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Йога{% endblock %}
+{% block heading %}Йога{% endblock %}
+{% block content %}
+
+{% if ok %}<div class="alert alert-ok">{{ ok }}</div>{% endif %}
+{% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+<h3 class="section-title">Форматы занятий и цены</h3>
+<p class="muted">Йога — онлайн-услуга без даты и мест. Пользователь выбирает формат и
+<b>количество</b> занятий, платит цену = цена за занятие × количество. После оплаты бот
+показывает контакт менеджера (он ведёт запись и время в личке) — счётчик остатка и
+«билет»/доступ в группу не выдаются. Скидка участнику клуба — процентом на формат
+(как у мероприятий). Правки применяются в боте сразу.</p>
+<p class="muted">Описание раздела (текст сверху) правится в разделе
+<a href="/screens">«Экраны бота»</a> (экран «Йога»). Контакт менеджера — в
+<a href="/settings">«Настройках»</a>.</p>
+
+{% for p in products %}
+<form method="post" action="/yoga/products/{{ p.id }}" class="card">
+  <h4 style="margin:0 0 .5rem 0;">{{ p.title }}</h4>
+  <div class="form-row">
+    <label>Цена за занятие, ₽
+      <input type="text" name="price" value="{{ p.price }}" class="input" required>
+    </label>
+  </div>
+  <div class="form-row">
+    <label>Скидка участнику клуба, %
+      <input type="number" name="discount" min="0" max="100" step="1" value="{{ p.discount }}" class="input" required>
+    </label>
+  </div>
+  <div class="form-row">
+    <label class="check">
+      <input type="checkbox" name="is_active" {{ 'checked' if p.is_active }}>
+      <span>Показывать формат в боте</span>
+    </label>
+  </div>
+  <button type="submit" class="btn btn-primary">Сохранить</button>
+</form>
+{% endfor %}
+
+{% if not products %}
+<div class="card"><p class="muted">Форматы занятий не заданы.</p></div>
+{% endif %}
+
+{% endblock %}

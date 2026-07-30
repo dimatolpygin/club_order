@@ -30,13 +30,19 @@ DIRECTION_LABELS = {
     "banya": "Билеты · Баня",
     "retreat": "Билеты · Ретриты",
     "ticket": "Билеты · Прочее",
+    "yoga": "Йога",
+    "consult": "Консультации",
+    "service": "Услуги · Прочее",
 }
-DIRECTION_ORDER = ("subscription", "banya", "retreat", "ticket")
+DIRECTION_ORDER = ("subscription", "banya", "retreat", "ticket", "yoga", "consult", "service")
 DIRECTION_COLORS = {
     "subscription": "#2563eb",
     "banya": "#16a34a",
     "retreat": "#0ea5e9",
     "ticket": "#9333ea",
+    "yoga": "#db2777",
+    "consult": "#f59e0b",
+    "service": "#64748b",
 }
 
 PERIOD_LABELS = {"30d": "30 дней", "year": "Год", "all": "Всё время", "custom": "Период"}
@@ -421,10 +427,13 @@ async def dashboard(request: Request):
     # Направления в фиксированном порядке (только ненулевые скрывать не будем —
     # показываем все известные, чтобы структура была стабильной).
     directions = []
+    # Всегда показываем основные направления; «прочее» и услуги — только с доходом,
+    # чтобы структура дашборда не пестрела нулевыми строками.
+    _optional = {"ticket", "yoga", "consult", "service"}
     for key in DIRECTION_ORDER:
         amount = by_dir.get(key, Decimal(0))
-        if key == "ticket" and not amount:
-            continue  # «прочие события» показываем только если есть
+        if key in _optional and not amount:
+            continue
         directions.append({
             "key": key,
             "label": DIRECTION_LABELS[key],

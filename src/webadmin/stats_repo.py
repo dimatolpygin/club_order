@@ -16,10 +16,11 @@ from decimal import Decimal
 
 import asyncpg
 
-# Направление дохода для платежа: подписка либо тип события билета.
+# Направление дохода для платежа: подписка, тип события билета или категория услуги.
 _DIRECTION_SQL = """
     CASE
         WHEN p.kind = 'ticket' THEN COALESCE(e.kind, 'ticket')
+        WHEN p.kind = 'service' THEN COALESCE(sp.category, 'service')
         ELSE 'subscription'
     END
 """
@@ -39,6 +40,7 @@ async def revenue_by_direction(
                COALESCE(SUM(p.amount), 0) AS total
         FROM payments p
         LEFT JOIN events e ON e.id = p.event_id
+        LEFT JOIN service_products sp ON sp.id = p.service_product_id
         WHERE p.status = 'succeeded'
           AND p.updated_at >= $1 AND p.updated_at < $2
         GROUP BY direction

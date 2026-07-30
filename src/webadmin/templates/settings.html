@@ -47,6 +47,20 @@
   {% endif %}
 </form>
 
+<h2 class="section-title">Контакт менеджера (Йога · Консультации)</h2>
+<form method="post" action="/settings/manager" class="card">
+  <p class="muted">Куда ведёт кнопка «Написать менеджеру» после оплаты услуги (йога,
+  консультации). Менеджер согласует время и ведёт запись/остаток в личке. Можно указать
+  <code>@username</code> или ссылку <code>https://t.me/…</code>. Пусто — вернётся дефолт
+  <code>@zhannazlotnikova</code>. Применяется сразу.</p>
+  <div class="inline-form">
+    <span class="field-label">Контакт менеджера:</span>
+    <input type="text" name="url" value="{{ manager_url or '' }}" placeholder="@zhannazlotnikova или https://t.me/zhannazlotnikova" class="input" style="min-width:340px">
+    <button type="submit" class="btn btn-primary">Сохранить</button>
+  </div>
+  <p class="muted">Текущий: <code>{{ manager_url }}</code></p>
+</form>
+
 <h2 class="section-title">Администраторы доступа</h2>
 <div class="card">
   <p class="muted">Кто получает заявки бота и доступ к управлению. <b>Основные</b> заданы

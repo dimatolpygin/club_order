@@ -61,6 +61,9 @@ _FSM_LABELS = {
 }
 
 _FSM_PREFIXES = (
+    ("screen:yoga:summary:", "Йога — оформление"),
+    ("screen:yoga:product:", "Йога — выбор количества"),
+    ("screen:yoga", "Йога — раздел"),
     ("screen:summary:", "Оформление заказа (сводка)"),
     ("screen:event:", "Мероприятие — карточка"),
     ("screen:ticket:address:", "Билет — адрес"),
@@ -117,6 +120,7 @@ async def _overview(request: Request, *, ok: str | None = None, error: str | Non
     pool = get_pool()
     cfg = await app_settings.reminder_config(pool)
     support = await app_settings.support_url(pool)
+    manager = await app_settings.manager_url(pool)
     extra = await app_settings.get_extra_admins(pool)
     rows = await repo.get_fsm_stuck(pool)
     now = datetime.now(timezone.utc)
@@ -139,6 +143,7 @@ async def _overview(request: Request, *, ok: str | None = None, error: str | Non
             "rem_kinds": _REM_KINDS,
             "check_interval": settings.reminder_check_interval_min,
             "support_url": support,
+            "manager_url": manager,
             "env_admins": sorted(settings.admin_id_list),
             "extra_admins": extra,
             "fsm": fsm,
@@ -206,6 +211,32 @@ async def settings_support(request: Request, url: str = Form("")):
     await app_settings.set_support_url(pool, normalized)
     logger.info("Админка: ссылка поддержки = {}", normalized)
     return RedirectResponse("/settings?ok=Ссылка поддержки сохранена.", status_code=303)
+
+
+@router.post("/settings/manager")
+async def settings_manager(request: Request, url: str = Form("")):
+    """Контакт менеджера услуг (йога/консультации) — кнопка после оплаты услуги."""
+    current_admin(request)
+    pool = get_pool()
+    raw = (url or "").strip()
+    if not raw:
+        # Пусто → возвращаем дефолт (@zhannazlotnikova), контакт не должен исчезать.
+        await app_settings.set_manager_url(pool, "")
+        logger.info("Админка: контакт менеджера сброшен на дефолт")
+        return RedirectResponse(
+            "/settings?ok=Контакт менеджера сброшен на дефолт (@zhannazlotnikova).",
+            status_code=303,
+        )
+    normalized = _normalize_support_url(raw)
+    if not normalized:
+        return await _overview(
+            request,
+            error="Не похоже на ссылку. Укажите @username или ссылку вида https://t.me/…",
+            status=400,
+        )
+    await app_settings.set_manager_url(pool, normalized)
+    logger.info("Админка: контакт менеджера = {}", normalized)
+    return RedirectResponse("/settings?ok=Контакт менеджера сохранён.", status_code=303)
 
 
 @router.post("/settings/admins/add")

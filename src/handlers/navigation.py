@@ -76,11 +76,11 @@ async def nav_menu(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext) -> 
     await _show(cb, pool, "start", "start", await menu.welcome_kb(pool, subscribed))
 
 
-@router.callback_query(F.data.in_({kb.NAV_YOGA, kb.NAV_CONSULT}))
+@router.callback_query(F.data == kb.NAV_CONSULT)
 async def nav_coming_soon(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
-    # Разделы «Йога»/«Консультации» открываются на этапах 46/47. Кнопки по
-    # умолчанию скрыты (services.menu.DEFAULT_HIDDEN); если админ включил показ
-    # раньше срока — не оставляем кнопку «мёртвой», показываем заглушку-попап.
+    # Раздел «Консультации» открывается на этапе 47 (Йога уже открыта — этап 46).
+    # Кнопка по умолчанию скрыта (services.menu.DEFAULT_HIDDEN); если админ включил
+    # показ раньше срока — не оставляем кнопку «мёртвой», показываем заглушку-попап.
     await cb.answer("Раздел скоро откроется.", show_alert=True)
     logger.info(f"🤖 Бот → @{cb.from_user.username or '—'}: раздел в разработке ({cb.data})")
 

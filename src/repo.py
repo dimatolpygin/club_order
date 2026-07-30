@@ -549,15 +549,17 @@ async def create_payment(
     promo_id: int | None = None,
     event_id: int | None = None,
     ticket_type: str | None = None,
+    service_product_id: int | None = None,
+    quantity: int | None = None,
 ) -> int:
     row = await pool.fetchrow(
         """
         INSERT INTO payments(
             yookassa_payment_id, idempotence_key, tg_id, tier_id, months, unit,
             fixed_price, amount, confirmation_url, status, kind, promo_id,
-            event_id, ticket_type
+            event_id, ticket_type, service_product_id, quantity
         )
-        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         RETURNING id
         """,
         yookassa_payment_id,
@@ -574,8 +576,60 @@ async def create_payment(
         promo_id,
         event_id,
         ticket_type,
+        service_product_id,
+        quantity,
     )
     return row["id"]
+
+
+# ── Продукты услуг «по количеству»: йога/консультации (этапы 46/47) ───────────
+async def list_service_products(
+    pool: asyncpg.Pool, category: str, *, active_only: bool = False
+) -> list[asyncpg.Record]:
+    """Продукты категории в порядке показа. active_only — только включённые."""
+    if active_only:
+        return await pool.fetch(
+            "SELECT * FROM service_products WHERE category = $1 AND is_active "
+            "ORDER BY sort_order, id",
+            category,
+        )
+    return await pool.fetch(
+        "SELECT * FROM service_products WHERE category = $1 ORDER BY sort_order, id",
+        category,
+    )
+
+
+async def get_service_product(pool: asyncpg.Pool, product_id: int) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        "SELECT * FROM service_products WHERE id = $1", product_id
+    )
+
+
+async def update_service_product(
+    pool: asyncpg.Pool, product_id: int, *,
+    price: int, subscriber_discount_percent: int, is_active: bool,
+) -> None:
+    """Правит цену/скидку/активность продукта (набор продуктов задаёт миграция-сид)."""
+    await pool.execute(
+        "UPDATE service_products SET price = $2, subscriber_discount_percent = $3, "
+        "is_active = $4 WHERE id = $1",
+        product_id, price, subscriber_discount_percent, is_active,
+    )
+
+
+async def activate_service_payment(pool: asyncpg.Pool, yk_id: str) -> bool:
+    """Помечает платёж услуги succeeded ровно один раз. True — если это первая пометка.
+
+    Услуга не выдаёт билет и не занимает место — активация лишь фиксирует оплату
+    (атомарно, без дублей): начисления рефералки, уведомление админам и сообщение
+    пользователю вешаются вызывающим кодом на факт `created=True`.
+    """
+    row = await pool.fetchrow(
+        "UPDATE payments SET status = 'succeeded', updated_at = now() "
+        "WHERE yookassa_payment_id = $1 AND status <> 'succeeded' RETURNING id",
+        yk_id,
+    )
+    return row is not None
 
 
 async def get_payment_by_yk_id(pool: asyncpg.Pool, yk_id: str) -> asyncpg.Record | None:

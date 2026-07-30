@@ -65,6 +65,12 @@ SCREEN_DEFS: dict[str, dict] = {
         "menu": None,
         "hint": "Экран поддержки (когда ссылка задана). Сама ссылка — в настройках бота.",
     },
+    "yoga": {
+        "title": "Йога — описание раздела",
+        "default": texts.YOGA_INTRO,
+        "menu": None,
+        "hint": "Вводный текст раздела «Йога». Форматы и цены — кнопками (раздел «Йога» в админке).",
+    },
     "support_no_link": {
         "title": "Поддержка — ссылка не задана",
         "default": texts.SUPPORT_NO_LINK,

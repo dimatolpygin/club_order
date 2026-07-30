@@ -27,6 +27,15 @@ NAV_REFERRAL = "nav:referral"  # Пригласить друга / моя реф
 NAV_MYTICKETS = "nav:mytickets"  # Мои билеты (этап 18)
 NAV_BONUSES = "nav:bonuses"  # Мои бонусы: активные · скоро начислится · всего (этап 41)
 
+# Услуги «по количеству»: йога (этап 46). Раздел открывается по NAV_YOGA.
+YPROD = "yprod"          # yprod:{product_id} — выбрать формат → выбор количества
+YQTY = "yqty"            # yqty:{product_id}:{qty} — выбрано количество → сводка
+YPAY = "ypay"            # ypay:{product_id}:{qty} — создать платёж
+YCHECK = "ycheck"        # ycheck:{yk_id} — проверить оплату услуги
+YCANCEL = "ycancel"      # ycancel:{yk_id} — отменить незавершённый платёж
+# Количества для выбора в разделе услуг (инлайн-кнопки).
+QUANTITY_CHOICES: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8)
+
 # Раздел «Мои билеты» (этап 18).
 MYT_OPEN = "myt"             # myt:{ticket_id} — карточка билета
 MYT_REFUND = "mytref"        # mytref:{ticket_id} — запрос на возврат (подтверждение)
@@ -357,6 +366,80 @@ def ticket_address_kb(back_cb: str = NAV_EVENTS) -> InlineKeyboardMarkup:
     """После показа адреса: к списку мероприятий (по виду события) + в главное меню."""
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="К мероприятиям", callback_data=back_cb))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
+    return b.as_markup()
+
+
+# ── Йога: услуги «по количеству» (этап 46) ───────────────────────────────────
+def yoga_products_kb(products: list) -> InlineKeyboardMarkup:
+    """Раздел «Йога»: кнопка на каждый активный продукт (формат — цена) + «Назад».
+
+    `products` — записи service_products (поля id/title/price). Цена в подписи —
+    базовая за занятие; скидка участника применяется на экране количества/сводки.
+    """
+    from .utils import fmt_price
+
+    b = InlineKeyboardBuilder()
+    for p in products:
+        b.row(InlineKeyboardButton(
+            text=f"{p['title']} — {fmt_price(p['price'])} ₽",
+            callback_data=f"{YPROD}:{p['id']}",
+        ))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_START))
+    return b.as_markup()
+
+
+def yoga_quantity_kb(product_id: int) -> InlineKeyboardMarkup:
+    """Выбор количества занятий: инлайн-кнопки 1..8 + «Назад» к списку форматов."""
+    b = InlineKeyboardBuilder()
+    row: list[InlineKeyboardButton] = []
+    for n in QUANTITY_CHOICES:
+        row.append(InlineKeyboardButton(text=str(n), callback_data=f"{YQTY}:{product_id}:{n}"))
+        if len(row) == 4:
+            b.row(*row)
+            row = []
+    if row:
+        b.row(*row)
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_YOGA))
+    return b.as_markup()
+
+
+def service_summary_kb(product_id: int, quantity: int) -> InlineKeyboardMarkup:
+    """Сводка услуги: оплата + изменить количество + «Назад» в раздел."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="Перейти к оплате", callback_data=f"{YPAY}:{product_id}:{quantity}"
+    ))
+    b.row(InlineKeyboardButton(
+        text="Изменить количество", callback_data=f"{YPROD}:{product_id}"
+    ))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_YOGA))
+    return b.as_markup()
+
+
+def service_pay_kb(confirmation_url: str | None, yk_id: str) -> InlineKeyboardMarkup:
+    """Экран оплаты услуги: «Оплатить» (ссылка) + «Проверить оплату» + «Отмена»."""
+    b = InlineKeyboardBuilder()
+    if confirmation_url:
+        b.row(InlineKeyboardButton(text="Оплатить", url=confirmation_url))
+    b.row(InlineKeyboardButton(text="Проверить оплату", callback_data=f"{YCHECK}:{yk_id}"))
+    b.row(InlineKeyboardButton(text="Отмена", callback_data=f"{YCANCEL}:{yk_id}"))
+    return b.as_markup()
+
+
+def service_paid_kb(manager_url: str | None) -> InlineKeyboardMarkup:
+    """Услуга оплачена: «Написать менеджеру» (ссылка) + «В главное меню»."""
+    b = InlineKeyboardBuilder()
+    if manager_url:
+        b.row(InlineKeyboardButton(text="Написать менеджеру", url=manager_url))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
+    return b.as_markup()
+
+
+def service_canceled_kb() -> InlineKeyboardMarkup:
+    """После отмены платежа услуги: вернуться в раздел «Йога» + в меню."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Вернуться в раздел", callback_data=NAV_YOGA))
     b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
     return b.as_markup()
 

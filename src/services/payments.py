@@ -421,8 +421,10 @@ async def poll_pending(pool: asyncpg.Pool, bot: Bot) -> None:
     """Фоновый проход поллера по всем pending-платежам.
 
     Диспетчеризация по kind: билеты (kind='ticket') синкаются через
-    services.tickets, подписки/продления/промо — через sync_payment.
+    services.tickets, услуги (kind='service') — через services.service_sales,
+    подписки/продления/промо — через sync_payment.
     """
+    from . import service_sales as service_service
     from . import tickets as tickets_service
 
     pending = await repo.get_pending_payments(pool)
@@ -433,6 +435,8 @@ async def poll_pending(pool: asyncpg.Pool, bot: Bot) -> None:
         try:
             if p["kind"] == "ticket":
                 await tickets_service.sync_ticket_payment(pool, bot, p)
+            elif p["kind"] == "service":
+                await service_service.sync_service_payment(pool, bot, p)
             else:
                 await sync_payment(pool, bot, p)
         except Exception as e:  # noqa: BLE001 — один платёж не должен ронять цикл

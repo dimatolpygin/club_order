@@ -24,6 +24,7 @@ from ..logger import logger
 from ..utils import fmt_price
 from . import app_settings
 from . import events as ev
+from . import referral_rules as ref_rules
 
 
 def all_admin_ids() -> list[int]:
@@ -70,6 +71,25 @@ async def ticket_sold(
     logger.info(
         f"📣 Админам о продаже билета #{ticket['id']} («{event['title']}», "
         f"{fmt_price(ticket['price'])} ₽) — доставлено {sent}"
+    )
+
+
+async def service_sold(
+    pool: asyncpg.Pool, bot: Bot, *, tg_id: int, product, quantity: int, amount,
+) -> None:
+    """Уведомление о проданной услуге (йога/консультации): кто, что, сколько, почём."""
+    if product is None:
+        return
+    username, first_name = await _buyer(pool, tg_id)
+    text = texts.admin_service_sale(
+        username=username, first_name=first_name, user_id=tg_id,
+        category=ref_rules.category_label(product["category"]),
+        title=product["title"], quantity=quantity, amount=fmt_price(amount),
+    )
+    sent = await notify_admins(bot, text)
+    logger.info(
+        f"📣 Админам о продаже услуги «{product['title']}» × {quantity} "
+        f"({fmt_price(amount)} ₽) — доставлено {sent}"
     )
 
 

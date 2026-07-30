@@ -24,6 +24,11 @@ KEY_LAST = "reminder_last_offset"
 # Ссылка на аккаунт поддержки (кнопка «Перейти» в разделе «Поддержка»).
 KEY_SUPPORT_URL = "support_url"
 
+# Контакт менеджера услуг (йога/консультации): куда ведёт кнопка после оплаты
+# услуги (этапы 46/47). Дефолт — @zhannazlotnikova (ведёт запись/остаток в личке).
+KEY_MANAGER_URL = "manager_url"
+DEFAULT_MANAGER_URL = "https://t.me/zhannazlotnikova"
+
 # Доп-администраторы, добавленные из админки (помимо ADMIN_IDS из .env).
 KEY_EXTRA_ADMINS = "extra_admin_ids"
 
@@ -85,6 +90,16 @@ async def support_url(pool: asyncpg.Pool) -> str:
 
 async def set_support_url(pool: asyncpg.Pool, url: str) -> None:
     await repo.set_setting(pool, KEY_SUPPORT_URL, url)
+
+
+async def manager_url(pool: asyncpg.Pool) -> str:
+    """Контакт менеджера услуг: из bot_settings, иначе дефолт (@zhannazlotnikova)."""
+    stored = await repo.get_settings(pool, [KEY_MANAGER_URL])
+    return stored.get(KEY_MANAGER_URL) or DEFAULT_MANAGER_URL
+
+
+async def set_manager_url(pool: asyncpg.Pool, url: str) -> None:
+    await repo.set_setting(pool, KEY_MANAGER_URL, url)
 
 
 # ── Две цены подписки (этап 43) ───────────────────────────────────────────────

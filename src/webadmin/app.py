@@ -28,6 +28,7 @@ from .menu_buttons import router as menu_buttons_router
 from .promos import router as promos_router
 from .referral import router as referral_router
 from .screens import router as screens_router
+from .services import router as services_router
 from .settings import router as settings_router
 from .stats import router as stats_router
 from .subscriptions import router as subscriptions_router
@@ -47,6 +48,7 @@ app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static"
 app.include_router(stats_router)
 app.include_router(events_router)
 app.include_router(tickets_router)
+app.include_router(services_router)
 app.include_router(referral_router)
 app.include_router(subscriptions_router)
 app.include_router(tariffs_router)
