@@ -36,6 +36,16 @@ YCANCEL = "ycancel"      # ycancel:{yk_id} — отменить незаверш
 # Количества для выбора в разделе услуг (инлайн-кнопки).
 QUANTITY_CHOICES: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8)
 
+# Консультации: пакеты 1/4/8/12 (этап 47). Раздел открывается по NAV_CONSULT.
+# Покупается один пакет (количество = 1), но цена пересчитывается со скидкой/промо/
+# бонусами — поэтому callback'и оплаты/тоггла несут promo_id и флаг бонусов.
+CPKG = "cpkg"        # cpkg:{product_id} — выбрать пакет → сводка
+CPROMO = "cpromo"    # cpromo:{product_id} — ввести промокод для пакета
+CBONUS = "cbonus"    # cbonus:{product_id}:{promo_or_0}:{1|0} — тоггл бонусов
+CPAY = "cpay"        # cpay:{product_id}:{promo_or_0}:{1|0} — создать платёж
+CCHECK = "ccheck"    # ccheck:{yk_id} — проверить оплату пакета
+CCANCEL = "ccancel"  # ccancel:{yk_id} — отменить платёж + вернуть бонусы
+
 # Раздел «Мои билеты» (этап 18).
 MYT_OPEN = "myt"             # myt:{ticket_id} — карточка билета
 MYT_REFUND = "mytref"        # mytref:{ticket_id} — запрос на возврат (подтверждение)
@@ -440,6 +450,96 @@ def service_canceled_kb() -> InlineKeyboardMarkup:
     """После отмены платежа услуги: вернуться в раздел «Йога» + в меню."""
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="Вернуться в раздел", callback_data=NAV_YOGA))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
+    return b.as_markup()
+
+
+# ── Консультации: пакеты со скидками/промо/бонусами (этап 47) ─────────────────
+def consult_packages_kb(products: list) -> InlineKeyboardMarkup:
+    """Раздел «Консультации»: кнопка на каждый активный пакет (пакет — цена) + «Назад».
+
+    `products` — записи service_products (поля id/title/price). Цена в подписи —
+    базовая за пакет; скидка участника/промокод/бонусы применяются на экране сводки.
+    """
+    from .utils import fmt_price
+
+    b = InlineKeyboardBuilder()
+    for p in products:
+        b.row(InlineKeyboardButton(
+            text=f"{p['title']} — {fmt_price(p['price'])} ₽",
+            callback_data=f"{CPKG}:{p['id']}",
+        ))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_START))
+    return b.as_markup()
+
+
+def consult_summary_kb(
+    product_id: int, promo_id: int | None = None,
+    *, use_bonus: bool = False, bonus_cap: int = 0,
+) -> InlineKeyboardMarkup:
+    """Сводка по пакету консультаций: оплата + тоггл бонусов + промокод + «Назад».
+
+    Промокод и флаг бонусов зашиты в callback оплаты/тоггла (источник истины —
+    пересчёт при создании платежа). bonus_cap>0 → показываем тоггл «Списать бонусы».
+    """
+    b = InlineKeyboardBuilder()
+    promo_part = promo_id if promo_id is not None else 0
+    pay_cb = f"{CPAY}:{product_id}:{promo_part}:{1 if use_bonus else 0}"
+    b.row(InlineKeyboardButton(text="Перейти к оплате", callback_data=pay_cb))
+    if bonus_cap > 0:
+        if use_bonus:
+            b.row(InlineKeyboardButton(
+                text="Не списывать бонусы",
+                callback_data=f"{CBONUS}:{product_id}:{promo_part}:0",
+            ))
+        else:
+            b.row(InlineKeyboardButton(
+                text=f"Списать бонусы (−{bonus_cap} ₽)",
+                callback_data=f"{CBONUS}:{product_id}:{promo_part}:1",
+            ))
+    promo_label = "Ввести другой промокод" if promo_id is not None else "Ввести промокод"
+    b.row(InlineKeyboardButton(text=promo_label, callback_data=f"{CPROMO}:{product_id}"))
+    b.row(InlineKeyboardButton(text="Назад", callback_data=NAV_CONSULT))
+    return b.as_markup()
+
+
+def consult_promo_enter_kb(product_id: int) -> InlineKeyboardMarkup:
+    """Экран ввода промокода для пакета: «Отмена» возвращает к сводке пакета."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Отмена", callback_data=f"{CPKG}:{product_id}"))
+    return b.as_markup()
+
+
+def consult_promo_retry_kb(product_id: int) -> InlineKeyboardMarkup:
+    """Промокод не подошёл: ввести ещё раз / продолжить без него / в меню."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(
+        text="Ввести промокод ещё раз", callback_data=f"{CPROMO}:{product_id}"
+    ))
+    b.row(InlineKeyboardButton(
+        text="Продолжить без промокода", callback_data=f"{CPKG}:{product_id}"
+    ))
+    b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
+    return b.as_markup()
+
+
+def consult_pay_kb(confirmation_url: str | None, yk_id: str) -> InlineKeyboardMarkup:
+    """Экран оплаты пакета: «Оплатить» (ссылка) + «Проверить оплату» + «Отмена».
+
+    «Отмена» отменяет незавершённый платёж и возвращает списанные бонусы (этап 47).
+    """
+    b = InlineKeyboardBuilder()
+    if confirmation_url:
+        b.row(InlineKeyboardButton(text="Оплатить", url=confirmation_url))
+    b.row(InlineKeyboardButton(text="Проверить оплату", callback_data=f"{CCHECK}:{yk_id}"))
+    b.row(InlineKeyboardButton(text="Отмена", callback_data=f"{CCANCEL}:{yk_id}"))
+    return b.as_markup()
+
+
+def consult_canceled_kb() -> InlineKeyboardMarkup:
+    """После отмены платежа пакета: вернуться в раздел «Консультации» + в меню."""
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="Вернуться в раздел", callback_data=NAV_CONSULT))
     b.row(InlineKeyboardButton(text="В главное меню", callback_data=NAV_START))
     return b.as_markup()
 

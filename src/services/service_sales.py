@@ -1,18 +1,21 @@
 """Продажа услуг «по количеству» без даты/мест: йога, консультации (этапы 46/47).
 
 Услуга — НЕ событие: нет даты, мест и счётчика остатка. Пользователь выбирает
-продукт категории (йога: индивидуальное/групповое) и количество; сумма = цена
-продукта × количество. После оплаты услуга НЕ выдаёт билет и доступ в группу —
-пользователь получает контакт менеджера (@zhannazlotnikova ведёт запись в личке).
+продукт категории (йога: индивидуальное/групповое; консультации: пакет 1/4/8/12) и
+количество; сумма = цена продукта × количество (у консультаций количество = 1, число
+несёт пакет). После оплаты услуга НЕ выдаёт билет и доступ в группу — пользователь
+получает контакт менеджера (@zhannazlotnikova ведёт запись в личке).
 
 Переиспользует платёжный конвейер: создаёт платёж ЮKassa (`kind='service'`), а при
 подтверждении лишь фиксирует оплату (`repo.activate_service_payment` — без выдачи
 билета), после чего начисляет рефералку (сразу — у услуги нет даты события),
 уведомляет админов (этап 42) и шлёт пользователю контакт менеджера.
 
-Скидки: скидка подписчику (процент на продукт) и скидка новичка по реф-ссылке НЕ
-суммируются — берётся максимальная (`ev.best_ticket_price`, как у билетов). Промокоды
-и бонусы к услугам подключим на этапе 47 (для йоги решением раунда 4 они не нужны).
+Скидки: скидка подписчику (процент на продукт), скидка новичка по реф-ссылке и
+percent-промокод НЕ суммируются — берётся максимальная (`ev.best_ticket_price`, как у
+билетов); бонусы добивают цену уже со скидкой, но не более 50% (`ev.bonus_cap`).
+Промокоды и бонусы подключены на этапе 47 (консультации); йога вызывает расчёт без
+них (`promo_id=None`, `use_bonus=False`) — решением раунда 4 они ей не нужны.
 """
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ from ..logger import logger
 from ..utils import fmt_price
 from . import admin_alerts
 from . import events as ev
+from . import promo as promo_service
 from . import referral_rules as ref_rules
 from .receipt import build_receipt
 from .referral_notify import qualify_and_notify
@@ -55,40 +59,90 @@ async def _referral_discount(
     return ref_rules.discount_for(rule, base_price)
 
 
+async def _promo_percent(
+    pool: asyncpg.Pool, promo_id: int | None, tg_id: int
+) -> tuple[int, asyncpg.Record | None]:
+    """Процент скидки действующего percent-промокода для юзера (услуги, этап 47).
+
+    Как у билетов (`tickets._promo_percent`): ревалидирует код в момент показа/оплаты.
+    Возвращает (pct, promo): pct=0, если промокода нет, он невалиден, исчерпан/просрочен,
+    уже использован этим юзером или имеет тип `fixed_price` (тот действует лишь на подписку).
+    """
+    if promo_id is None:
+        return 0, None
+    promo = await repo.get_promo(pool, promo_id)
+    if promo is None or promo["kind"] != promo_service.KIND_PERCENT:
+        return 0, None
+    already = await repo.user_redeemed_promo(pool, promo_id, tg_id)
+    status = promo_service.validate(
+        promo, now=datetime.now(timezone.utc), already_used=already
+    )
+    if status != promo_service.VALID:
+        return 0, None
+    return int(promo["value"]), promo
+
+
 async def compute_service_pricing(
-    pool: asyncpg.Pool, *, tg_id: int, product, quantity: int
+    pool: asyncpg.Pool, *, tg_id: int, product, quantity: int,
+    promo_id: int | None = None, use_bonus: bool = False,
 ) -> dict:
     """Единый расчёт цены услуги (источник истины для показа и оплаты).
 
-    База = цена продукта × количество. Скидка подписчику (процент продукта) и
-    скидка новичка (реф-ссылка) НЕ суммируются — берётся максимальная.
+    База = цена продукта × количество. Скидка подписчику (процент продукта), скидка
+    новичка (реф-ссылка) и percent-промокод НЕ суммируются — берётся максимальная
+    (`ev.best_ticket_price`); бонусы добивают цену уже со скидкой, но не более 50%
+    (`ev.bonus_cap`). Йога зовёт без promo_id/use_bonus → промо/бонусы обнуляются.
     """
     base = Decimal(str(product["price"])) * quantity
     is_subscriber = await repo.get_active_subscription(pool, tg_id) is not None
     subscriber_pct = product["subscriber_discount_percent"] if is_subscriber else 0
+    promo_pct, promo = await _promo_percent(pool, promo_id, tg_id)
     referral_amount = await _referral_discount(pool, tg_id, product["category"], base)
 
     price, applied = ev.best_ticket_price(
-        base, subscriber_pct=subscriber_pct, promo_pct=0, referral_amount=referral_amount,
+        base, subscriber_pct=subscriber_pct, promo_pct=promo_pct,
+        referral_amount=referral_amount,
     )
+    applied_promo_id = promo_id if applied == "promo" else None
+    discount_pct = (
+        promo_pct if applied == "promo"
+        else subscriber_pct if applied == "subscriber" else 0
+    )
+    balance = await repo.bonus_balance(pool, tg_id)
+    cap = ev.bonus_cap(price, balance)
+    bonus_used = cap if (use_bonus and cap > 0) else 0
+    final = price - Decimal(bonus_used)
     return {
         "base_price": base,
         "price_after_discount": price,
         "applied": applied,
         "subscriber_pct": subscriber_pct,
+        "discount_pct": discount_pct,
+        "promo": promo,
+        "applied_promo_id": applied_promo_id,
         "referral_amount": referral_amount,
-        "final": price,
+        "balance": balance,
+        "bonus_cap": cap,
+        "bonus_used": bonus_used,
+        "final": final,
     }
 
 
 async def start_service_payment(
     pool: asyncpg.Pool, *, tg_id: int, product_id: int, quantity: int, return_url: str,
+    promo_id: int | None = None, use_bonus: bool = False,
 ) -> tuple[str, dict | None]:
     """Создаёт платёж ЮKassa за услугу. Возвращает (статус, данные):
 
-      'ok' + dict — платёж создан (payment_id, confirmation_url, amount, quantity, title);
-      'invalid'   — продукт недоступен (выключен, нет цены) или количество вне 1..MAX;
-      'free'      — цена со скидкой 0 ₽ (оплата не нужна — редкий кейс, в поддержку).
+      'ok' + dict     — платёж создан (payment_id, confirmation_url, amount, quantity, title);
+      'invalid'       — продукт недоступен (выключен, нет цены) или количество вне 1..MAX;
+      'free'          — цена со скидкой 0 ₽ (оплата не нужна — редкий кейс, в поддержку);
+      'bonus_failed'  — не удалось списать бонусы (баланс изменился) — повторить.
+
+    Скидки (подписчик/промокод/новичок) НЕ суммируются — берётся максимальная; бонусы
+    добивают цену до −50%. promo_id привязывается к платежу только если промокод реально
+    выиграл. Бонусы списываются под платёж (`spend_bonuses`); при срыве оплаты
+    возвращаются (`refund_bonuses` в sync/cancel).
     """
     product = await repo.get_service_product(pool, product_id)
     if product is None or not product["is_active"] or product["price"] <= 0:
@@ -96,8 +150,12 @@ async def start_service_payment(
     if not (1 <= quantity <= MAX_QUANTITY):
         return "invalid", None
 
-    pr = await compute_service_pricing(pool, tg_id=tg_id, product=product, quantity=quantity)
+    pr = await compute_service_pricing(
+        pool, tg_id=tg_id, product=product, quantity=quantity,
+        promo_id=promo_id, use_bonus=use_bonus,
+    )
     amount: Decimal = pr["final"]
+    bonus_used = pr["bonus_used"]
     if amount <= 0:
         return "free", None
 
@@ -113,13 +171,17 @@ async def start_service_payment(
         "product_id": str(product_id),
         "quantity": str(quantity),
     }
+    if pr["applied_promo_id"] is not None:
+        metadata["promo_id"] = str(pr["applied_promo_id"])
+    if bonus_used:
+        metadata["bonus_used"] = str(bonus_used)
     payment = await create_payment(
         amount=amount, description=description, return_url=return_url,
         metadata=metadata, receipt=receipt, idempotence_key=idem,
     )
     yk_id = payment["id"]
     confirmation_url = (payment.get("confirmation") or {}).get("confirmation_url")
-    await repo.create_payment(
+    payment_db_id = await repo.create_payment(
         pool,
         yookassa_payment_id=yk_id,
         idempotence_key=idem,
@@ -131,17 +193,34 @@ async def start_service_payment(
         confirmation_url=confirmation_url,
         status=payment.get("status", "pending"),
         kind="service",
+        promo_id=pr["applied_promo_id"],
         service_product_id=product_id,
         quantity=quantity,
     )
+    # Списываем бонусы под платёж (под advisory-локом; защита от овердрафта/дублей).
+    if bonus_used:
+        ok = await repo.spend_bonuses(
+            pool, tg_id=tg_id, payment_id=payment_db_id, amount=bonus_used
+        )
+        if not ok:
+            await repo.mark_payment_canceled(pool, yk_id)
+            logger.warning(
+                f"🧘 Не удалось списать {bonus_used} бонусов (tg_id={tg_id}, yk_id={yk_id}) "
+                f"— платёж отменён"
+            )
+            return "bonus_failed", None
+
     disc = ""
-    if pr["applied"] == "subscriber":
+    if pr["applied"] == "promo" and pr["promo"] is not None:
+        disc = f", промокод {pr['promo']['code']} −{pr['discount_pct']}%"
+    elif pr["applied"] == "subscriber":
         disc = f", скидка участника −{pr['subscriber_pct']}%"
     elif pr["applied"] == "referral":
         disc = f", скидка новичка −{pr['referral_amount']} ₽"
+    bonus_note = f", бонусами −{bonus_used} ₽" if bonus_used else ""
     logger.info(
         f"🧘 Платёж за услугу создан: tg_id={tg_id}, «{product['title']}» × {quantity}, "
-        f"{fmt_price(amount)} ₽{disc}, yk_id={yk_id}"
+        f"{fmt_price(amount)} ₽{disc}{bonus_note}, yk_id={yk_id}"
     )
     return "ok", {
         "payment_id": yk_id,
@@ -208,10 +287,52 @@ async def sync_service_payment(
 
     if status in ("canceled", "cancelled"):
         await repo.mark_payment_canceled(pool, yk_id)
+        # Платёж не прошёл — возвращаем списанные под него бонусы (идемпотентно).
+        if await repo.refund_bonuses(pool, payment["id"]):
+            logger.info(f"↩️ Бонусы возвращены: платёж услуги отменён (yk_id={yk_id})")
         logger.info(f"🚫 Платёж за услугу отменён: tg_id={payment['tg_id']}, yk_id={yk_id}")
         return "canceled", None
 
     return "pending", None
+
+
+async def cancel_service_payment(
+    pool: asyncpg.Pool, bot: Bot, yk_id: str
+) -> tuple[str, dict | None]:
+    """Отмена незавершённого платежа услуги пользователем (возврат бонусов).
+
+    Сразу возвращает списанные бонусы, чтобы они не «зависали» при отказе от оплаты.
+    Перед отменой сверяет статус в ЮKassa: если платёж уже оплачен — НЕ отменяем, а
+    фиксируем оплату (деньги не теряем). Возвращает (статус, данные|None):
+      'succeeded' + paid  — оказалось уже оплачено, услуга зафиксирована;
+      'canceled'          — платёж отменён (бонусов к возврату не было);
+      'canceled_refunded' — платёж отменён, бонусы возвращены на счёт;
+      'not_found'         — платёж не найден.
+    """
+    payment = await repo.get_payment_by_yk_id(pool, yk_id)
+    if payment is None:
+        return "not_found", None
+    if payment["status"] == "succeeded":
+        return "succeeded", await _paid_data(pool, payment)
+    if payment["status"] == "canceled":
+        return "canceled", None
+
+    from .yookassa import YooKassaError
+    try:
+        data = await get_payment(yk_id)
+        status = data.get("status")
+    except YooKassaError:
+        status = None  # ЮKassa недоступна — считаем неоплаченным (пользователь сам отменил)
+    if status == "succeeded":
+        return await sync_service_payment(pool, bot, payment, notify=False)
+
+    await repo.mark_payment_canceled(pool, yk_id)
+    refunded = await repo.refund_bonuses(pool, payment["id"])
+    logger.info(
+        f"🚫 Платёж за услугу отменён пользователем (tg_id={payment['tg_id']}, yk_id={yk_id}), "
+        f"бонусы возвращены={refunded}"
+    )
+    return ("canceled_refunded" if refunded else "canceled"), None
 
 
 async def _paid_data(pool: asyncpg.Pool, payment: asyncpg.Record) -> dict | None:
