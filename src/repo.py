@@ -495,6 +495,21 @@ async def get_event_prices(pool: asyncpg.Pool, event_id: int) -> dict[str, int]:
     return {r["ticket_type"]: r["price"] for r in rows}
 
 
+async def get_event_price_tiers(
+    pool: asyncpg.Pool, event_id: int
+) -> dict[str, list[tuple[int, int]]]:
+    """Пороги динамической цены события (этап 45): {ticket_type: [(days_before, price)]}."""
+    rows = await pool.fetch(
+        "SELECT ticket_type, days_before, price FROM event_price_tiers "
+        "WHERE event_id = $1 ORDER BY ticket_type, days_before",
+        event_id,
+    )
+    out: dict[str, list[tuple[int, int]]] = {}
+    for r in rows:
+        out.setdefault(r["ticket_type"], []).append((r["days_before"], r["price"]))
+    return out
+
+
 async def prices_by_event(pool: asyncpg.Pool) -> dict[int, dict[str, int]]:
     """Цены всех событий сразу (для фильтра распроданных без N+1)."""
     rows = await pool.fetch("SELECT event_id, ticket_type, price FROM event_ticket_prices")

@@ -69,11 +69,73 @@ def _form_from_record(rec) -> dict:
     }
 
 
-def _parse_submit(form) -> tuple[dict, dict, dict, str | None]:
-    """Разбирает поданную форму. Возвращает (data, prices, refill, error).
+def _parse_tiers(form, refill: dict) -> tuple[list[tuple[str, int, int]], str | None]:
+    """Разбирает сетку динамических порогов «за N дней → цена» (этап 45).
+
+    Поля-массивы: `tier_days` (по строке) и `tier_price_{ttype}` (цена типа в строке,
+    выровнено по индексу). Пустые строки пропускаются. Возвращает (tiers, error), где
+    tiers — список (ticket_type, days_before, price). refill дополняется `tier_rows`
+    для повторного показа формы. Дубли (тип, days_before) запрещены (UNIQUE в БД).
+    """
+    days_list = form.getlist("tier_days")
+    price_lists = {t: form.getlist(f"tier_price_{t}") for t, _ in TICKET_TYPES}
+    rows: list[dict] = []
+    tiers: list[tuple[str, int, int]] = []
+    seen: set[tuple[str, int]] = set()
+    error: str | None = None
+    for i, raw_days in enumerate(days_list):
+        raw_days = (raw_days or "").strip()
+        row_prices = {
+            t: (price_lists[t][i] if i < len(price_lists[t]) else "").strip()
+            for t, _ in TICKET_TYPES
+        }
+        if not raw_days and all(v == "" for v in row_prices.values()):
+            continue  # пустая строка — пропускаем
+        rows.append({"days": raw_days, "prices": row_prices})
+        if error is not None:
+            continue  # уже есть ошибка — только собираем refill дальше
+        if not raw_days:
+            error = "У порога цены укажите «за сколько дней» до события."
+            continue
+        try:
+            days_before = int(raw_days)
+        except ValueError:
+            error = "«За N дней» в порогах — целое число."
+            continue
+        if days_before < 0:
+            error = "«За N дней» в порогах не может быть отрицательным."
+            continue
+        any_price = False
+        for t, _ in TICKET_TYPES:
+            pv = row_prices[t]
+            if pv == "":
+                continue
+            try:
+                price = int(pv)
+            except ValueError:
+                error = "Цены в порогах должны быть целыми числами."
+                break
+            if price < 0:
+                error = "Цена в порогах не может быть отрицательной."
+                break
+            if (t, days_before) in seen:
+                error = f"Повтор порога «за {days_before} дн.» для одного типа билета."
+                break
+            seen.add((t, days_before))
+            tiers.append((t, days_before, price))
+            any_price = True
+        if error is None and not any_price:
+            error = "У порога «за N дней» укажите цену хотя бы для одного типа билета."
+    refill["tier_rows"] = rows
+    return tiers, error
+
+
+def _parse_submit(form) -> tuple[dict, dict, list, dict, str | None]:
+    """Разбирает поданную форму. Возвращает (data, prices, tiers, refill, error).
 
     data    — словарь для events_repo (типизированные значения);
     prices  — {ticket_type: int|None} для set_prices;
+    tiers   — список (ticket_type, days_before, price) для set_price_tiers (этап 45);
     refill  — значения для повторного показа формы при ошибке;
     error   — текст ошибки или None.
     """
@@ -94,17 +156,20 @@ def _parse_submit(form) -> tuple[dict, dict, dict, str | None]:
     }
     prices_refill = {t: (form.get(f"price_{t}") or "").strip() for t, _ in TICKET_TYPES}
     refill["prices"] = prices_refill
+    # Динамические пороги (этап 45): парсим сразу, чтобы tier_rows попал в refill
+    # при любой ошибке формы (иначе введённые пороги пропадут при повторном показе).
+    tiers, tier_error = _parse_tiers(form, refill)
 
     if refill["kind"] not in _KIND_LABEL:
-        return {}, {}, refill, "Выберите тип мероприятия."
+        return {}, {}, [], refill, "Выберите тип мероприятия."
     if not refill["title"]:
-        return {}, {}, refill, "Укажите название мероприятия."
+        return {}, {}, [], refill, "Укажите название мероприятия."
     if not refill["starts_at"]:
-        return {}, {}, refill, "Укажите дату и время."
+        return {}, {}, [], refill, "Укажите дату и время."
     try:
         starts_at = datetime.fromisoformat(refill["starts_at"])
     except ValueError:
-        return {}, {}, refill, "Некорректная дата/время."
+        return {}, {}, [], refill, "Некорректная дата/время."
 
     try:
         seats_total = _parse_int(refill["seats_total"])
@@ -112,10 +177,10 @@ def _parse_submit(form) -> tuple[dict, dict, dict, str | None]:
         seats_female = _parse_int(refill["seats_female"])
         discount = _parse_int(refill["subscriber_discount_percent"], default=0)
     except ValueError:
-        return {}, {}, refill, "Места и скидка должны быть целыми числами."
+        return {}, {}, [], refill, "Места и скидка должны быть целыми числами."
 
     if discount < 0 or discount > 100:
-        return {}, {}, refill, "Скидка подписчику — от 0 до 100%."
+        return {}, {}, [], refill, "Скидка подписчику — от 0 до 100%."
 
     # Цены по типам билетов: пусто → тип не продаётся (None), число → цена.
     prices: dict[str, int | None] = {}
@@ -123,13 +188,16 @@ def _parse_submit(form) -> tuple[dict, dict, dict, str | None]:
         for ttype, _ in TICKET_TYPES:
             val = _parse_int(prices_refill[ttype])
             if val is not None and val < 0:
-                return {}, {}, refill, "Цена не может быть отрицательной."
+                return {}, {}, [], refill, "Цена не может быть отрицательной."
             prices[ttype] = val
     except ValueError:
-        return {}, {}, refill, "Цены должны быть целыми числами."
+        return {}, {}, [], refill, "Цены должны быть целыми числами."
 
     if all(v is None for v in prices.values()):
-        return {}, {}, refill, "Укажите цену хотя бы для одного типа билета."
+        return {}, {}, [], refill, "Укажите цену хотя бы для одного типа билета."
+
+    if tier_error is not None:
+        return {}, {}, [], refill, tier_error
 
     data = {
         "kind": refill["kind"], "title": refill["title"], "starts_at": starts_at,
@@ -140,7 +208,7 @@ def _parse_submit(form) -> tuple[dict, dict, dict, str | None]:
         "address": refill["address"], "rules_text": refill["rules_text"],
         "is_active": refill["is_active"],
     }
-    return data, prices, refill, None
+    return data, prices, tiers, refill, None
 
 
 # ── Список ───────────────────────────────────────────────────────────────────
@@ -195,19 +263,23 @@ async def events_list(request: Request):
 @router.get("/events/new")
 async def event_new(request: Request):
     current_admin(request)
-    return _render_form(request, _defaults_form(), {}, error=None, is_new=True)
+    return _render_form(request, _defaults_form(), {}, error=None, is_new=True, tier_rows=[])
 
 
 @router.post("/events/new")
 async def event_create(request: Request):
     current_admin(request)
     form = await request.form()
-    data, prices, refill, error = _parse_submit(form)
+    data, prices, tiers, refill, error = _parse_submit(form)
     if error:
-        return _render_form(request, refill, refill["prices"], error=error, is_new=True, status=400)
+        return _render_form(
+            request, refill, refill["prices"], error=error, is_new=True, status=400,
+            tier_rows=refill.get("tier_rows", []),
+        )
     pool = get_pool()
     event_id = await events_repo.create_event(pool, data)
     await events_repo.set_prices(pool, event_id, prices)
+    await events_repo.set_price_tiers(pool, event_id, tiers)
     logger.info("Админка: создано мероприятие #{} «{}»", event_id, data["title"])
     return RedirectResponse("/events", status_code=303)
 
@@ -221,20 +293,28 @@ async def event_edit(request: Request, event_id: int):
     if not rec:
         return RedirectResponse("/events", status_code=303)
     prices = await events_repo.get_prices(pool, event_id)
-    return _render_form(request, _form_from_record(rec), prices, error=None, is_new=False)
+    tier_rows = _tier_rows(await events_repo.get_price_tiers(pool, event_id))
+    return _render_form(
+        request, _form_from_record(rec), prices, error=None, is_new=False,
+        tier_rows=tier_rows,
+    )
 
 
 @router.post("/events/{event_id}/edit")
 async def event_update(request: Request, event_id: int):
     current_admin(request)
     form = await request.form()
-    data, prices, refill, error = _parse_submit(form)
+    data, prices, tiers, refill, error = _parse_submit(form)
     if error:
         refill["id"] = event_id
-        return _render_form(request, refill, refill["prices"], error=error, is_new=False, status=400)
+        return _render_form(
+            request, refill, refill["prices"], error=error, is_new=False, status=400,
+            tier_rows=refill.get("tier_rows", []),
+        )
     pool = get_pool()
     await events_repo.update_event(pool, event_id, data)
     await events_repo.set_prices(pool, event_id, prices)
+    await events_repo.set_price_tiers(pool, event_id, tiers)
     logger.info("Админка: обновлено мероприятие #{} «{}»", event_id, data["title"])
     return RedirectResponse("/events", status_code=303)
 
@@ -262,13 +342,27 @@ async def event_cancel(request: Request, event_id: int):
     return RedirectResponse("/events", status_code=303)
 
 
-def _render_form(request: Request, f: dict, prices: dict, *, error, is_new: bool, status: int = 200):
+def _tier_rows(tiers: list[dict]) -> list[dict]:
+    """Группирует плоские пороги в строки сетки: {'days': N, 'prices': {ttype: price}}.
+
+    Строки идут от большего days_before к меньшему (раньше события — выше в форме).
+    """
+    by_days: dict[int, dict[str, int]] = {}
+    for t in tiers:
+        by_days.setdefault(t["days_before"], {})[t["ticket_type"]] = t["price"]
+    return [{"days": d, "prices": by_days[d]} for d in sorted(by_days, reverse=True)]
+
+
+def _render_form(
+    request: Request, f: dict, prices: dict, *, error, is_new: bool,
+    tier_rows: list[dict], status: int = 200,
+):
     return templates.TemplateResponse(
         request, "event_form.html",
         {
             "active": "events", "admin": request.session.get("admin"),
             "f": f, "prices": prices, "error": error, "is_new": is_new,
-            "ticket_types": TICKET_TYPES, "kinds": KINDS,
+            "ticket_types": TICKET_TYPES, "kinds": KINDS, "tier_rows": tier_rows,
         },
         status_code=status,
     )

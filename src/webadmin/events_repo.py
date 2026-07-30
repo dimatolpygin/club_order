@@ -185,6 +185,37 @@ async def set_prices(pool: asyncpg.Pool, event_id: int, prices: dict[str, int | 
                     )
 
 
+async def get_price_tiers(pool: asyncpg.Pool, event_id: int) -> list[dict]:
+    """Пороги динамической цены события (этап 45), отсортированные по дате/типу."""
+    rows = await pool.fetch(
+        "SELECT ticket_type, days_before, price FROM event_price_tiers "
+        "WHERE event_id = $1 ORDER BY days_before, ticket_type",
+        event_id,
+    )
+    return [dict(r) for r in rows]
+
+
+async def set_price_tiers(
+    pool: asyncpg.Pool, event_id: int, tiers: list[tuple[str, int, int]]
+) -> None:
+    """Перезаписывает пороги события: полностью удаляет старые и вставляет новые.
+
+    tiers — список (ticket_type, days_before, price). Пустой список = порогов нет
+    (билеты продаются по базовой цене типа).
+    """
+    async with pool.acquire() as con:
+        async with con.transaction():
+            await con.execute(
+                "DELETE FROM event_price_tiers WHERE event_id = $1", event_id
+            )
+            for ttype, days_before, price in tiers:
+                await con.execute(
+                    "INSERT INTO event_price_tiers "
+                    "(event_id, ticket_type, days_before, price) VALUES ($1,$2,$3,$4)",
+                    event_id, ttype, days_before, price,
+                )
+
+
 async def delete_event(pool: asyncpg.Pool, event_id: int) -> None:
     # Цены удалятся каскадом (FK ON DELETE CASCADE).
     await pool.execute("DELETE FROM events WHERE id = $1", event_id)

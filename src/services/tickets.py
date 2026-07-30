@@ -49,6 +49,20 @@ async def _referral_discount(pool: asyncpg.Pool, tg_id: int, event, base_price) 
     return ref_rules.discount_for(rule, base_price)
 
 
+async def event_prices_now(pool: asyncpg.Pool, event) -> dict[str, int]:
+    """Цены билетов события на текущий момент с учётом порогов (этап 45).
+
+    Заменяет прямое чтение базовых цен: {ticket_type: цена момента}. Вне порогов
+    (или у события без порогов) — базовая цена типа. Единый источник для показа и
+    оплаты, поэтому экран выбора и сумма платежа всегда совпадают; при создании
+    платежа цена фиксируется этим же расчётом на момент оплаты.
+    """
+    base = await repo.get_event_prices(pool, event["id"])
+    tiers = await repo.get_event_price_tiers(pool, event["id"])
+    days = ev.days_until_event(event["starts_at"], datetime.now(timezone.utc))
+    return {t: ev.price_for_day(p, tiers.get(t, []), days) for t, p in base.items()}
+
+
 async def compute_ticket_pricing(
     pool: asyncpg.Pool, *, tg_id: int, event, ticket_type: str,
     base_price, promo_id: int | None = None, use_bonus: bool = False,
@@ -143,7 +157,7 @@ async def start_ticket_payment(
     if event is None or not event["is_active"]:
         return "invalid", None
 
-    prices = await repo.get_event_prices(pool, event_id)
+    prices = await event_prices_now(pool, event)
     if ticket_type not in prices:
         return "invalid", None
 

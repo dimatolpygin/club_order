@@ -66,6 +66,47 @@
       </div>
     </div>
 
+    <div class="field field-wide">
+      <span class="field-label">Динамические цены ранним покупателям, ₽</span>
+      <span class="field-hint">
+        Пороги «за N дней до события → цена» по типам билетов. Чем ближе дата — тем
+        дороже: действует ближайший порог, у которого «за N дней» не меньше числа
+        дней до события. Раньше самого раннего порога — базовая цена типа выше.
+        Оставьте пустым — динамики нет, продаётся по базовой цене.
+      </span>
+      <div class="tier-table-wrap" style="overflow-x:auto;">
+        <table class="tier-table" style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:.25rem .5rem;">За N дней</th>
+              {% for val, label in ticket_types %}
+              <th style="text-align:left;padding:.25rem .5rem;">{{ label }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody id="tier-rows">
+            {% for row in tier_rows %}
+            <tr>
+              <td style="padding:.15rem .5rem;"><input class="input" type="number" name="tier_days" min="0" value="{{ row.days }}" placeholder="напр. 7"></td>
+              {% for val, label in ticket_types %}
+              <td style="padding:.15rem .5rem;"><input class="input" type="number" name="tier_price_{{ val }}" min="0" value="{{ row.prices.get(val, '') }}" placeholder="—"></td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+            <tr>
+              <td style="padding:.15rem .5rem;"><input class="input" type="number" name="tier_days" min="0" placeholder="напр. 7"></td>
+              {% for val, label in ticket_types %}
+              <td style="padding:.15rem .5rem;"><input class="input" type="number" name="tier_price_{{ val }}" min="0" placeholder="—"></td>
+              {% endfor %}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="margin-top:.5rem;">
+        <button type="button" class="btn btn-light" onclick="addTierRow()">+ Добавить порог</button>
+      </div>
+    </div>
+
     <label class="field">
       <span class="field-label">Скидка подписчику клуба, %</span>
       <input class="input" type="number" name="subscriber_discount_percent" min="0" max="100" value="{{ f.subscriber_discount_percent }}">
@@ -111,6 +152,15 @@
     document.getElementById('seats-female-field').style.display = balanced ? '' : 'none';
   }
   toggleSeats(document.querySelector('[name=gender_balance]').checked);
+
+  // Динамические пороги (этап 45): клонируем последнюю строку и очищаем значения.
+  function addTierRow() {
+    var tbody = document.getElementById('tier-rows');
+    var last = tbody.rows[tbody.rows.length - 1];
+    var clone = last.cloneNode(true);
+    clone.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+    tbody.appendChild(clone);
+  }
 </script>
 
 {% endblock %}

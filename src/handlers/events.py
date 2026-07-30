@@ -181,7 +181,7 @@ async def show_event(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await repo.set_fsm_state(pool, cb.from_user.id, f"screen:event:{event_id}")
     back_cb = kb.events_nav_for_kind(event["kind"])
-    prices = await repo.get_event_prices(pool, event_id)
+    prices = await tickets.event_prices_now(pool, event)
     counts = await repo.get_event_ticket_counts(pool, event_id)
     items = ev.seat_availability(event, prices, ev.seats_occupied(counts))
 
@@ -238,7 +238,7 @@ async def choose_ticket(cb: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
         await _edit(cb, texts.EVENTS_NONE, kb.to_menu_kb())
         return
 
-    prices = await repo.get_event_prices(pool, event_id)
+    prices = await tickets.event_prices_now(pool, event)
     # Повторно проверяем доступность типа (мог распродаться между экранами).
     if ttype not in prices or not ev.has_seats(event, ttype):
         await cb.answer("Мест нет на этот тип билета.", show_alert=True)
@@ -292,7 +292,7 @@ async def ticket_promo_entered(
     if event is None or not event["is_active"]:
         await message.answer(texts.EVENTS_NONE, reply_markup=kb.to_menu_kb())
         return
-    prices = await repo.get_event_prices(pool, event_id)
+    prices = await tickets.event_prices_now(pool, event)
     if ttype not in prices or not ev.has_seats(event, ttype):
         await message.answer(texts.EVENT_SOLD_OUT, reply_markup=kb.to_menu_kb())
         return
@@ -351,7 +351,7 @@ async def ticket_bonus_toggle(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
     if event is None or not event["is_active"]:
         await _edit(cb, texts.EVENTS_NONE, kb.to_menu_kb())
         return
-    prices = await repo.get_event_prices(pool, event_id)
+    prices = await tickets.event_prices_now(pool, event)
     if ttype not in prices or not ev.has_seats(event, ttype):
         await cb.answer("Мест нет на этот тип билета.", show_alert=True)
         return

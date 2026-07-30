@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
@@ -177,6 +178,34 @@ def apply_discount(price: int | Decimal, percent: int) -> Decimal:
         return Decimal("0.00")
     discounted = base * (Decimal(100) - Decimal(percent)) / Decimal(100)
     return discounted.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+# ── Динамические цены ранним покупателям (этап 45) ───────────────────────────
+def days_until_event(starts_at: datetime, now: datetime) -> int:
+    """Целых суток до начала события (вниз). 0 — день события; <0 — событие прошло."""
+    return math.floor((starts_at - now).total_seconds() / 86400)
+
+
+def price_for_day(
+    base_price: int | Decimal,
+    tiers: Iterable[tuple[int, int]],
+    days_remaining: int,
+) -> int | Decimal:
+    """Цена типа билета на момент покупки с учётом порогов «за N дней» (этап 45).
+
+    `tiers` — пороги типа: (days_before, price). Действует тариф с НАИМЕНЬШИМ
+    days_before среди тех, где `days_before >= days_remaining` (самый близкий к
+    дате из ещё не наступивших). Подходящего порога нет (покупка раньше самого
+    раннего порога) → базовая цена типа. Так цена растёт при приближении даты,
+    а вне порогов = базовая (событие без порогов продаётся по базе).
+
+    Пример (за 7 дн — 1000, за 3 дн — 1500, в день — 2000): за 10 дн → база;
+    за 5 дн → 1000; за 2 дн → 1500; в день события → 2000.
+    """
+    applicable = [(d, p) for d, p in tiers if d >= days_remaining]
+    if not applicable:
+        return base_price
+    return min(applicable, key=lambda dp: dp[0])[1]
 
 
 # Порядок предпочтения при равной цене: чем меньше ранг, тем «дешевле» в учёте
