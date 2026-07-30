@@ -65,10 +65,14 @@ def _render(
 ) -> tuple[str, object]:
     """Текст и клавиатура для конкретного типа напоминания.
 
-    Цена в напоминании — текущая цена продления (этап 43); если она не задана,
-    падаем на зафиксированную ставку подписки.
+    Цена в напоминании — та, по которой реально пойдёт продление: закреплённая
+    промо-цена (price_locked, этап 44) либо текущая цена продления (этап 43); если
+    цена продления не задана — прежняя ставка подписки.
     """
-    monthly = renewal_rate if renewal_rate and renewal_rate > 0 else row["fixed_price"]
+    if row["price_locked"]:
+        monthly = row["fixed_price"]
+    else:
+        monthly = renewal_rate if renewal_rate and renewal_rate > 0 else row["fixed_price"]
     price = fmt_price(monthly)
     if kind == "early":
         remaining = texts.remaining_phrase(row["end_date"], now, row["unit"])

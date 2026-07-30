@@ -151,10 +151,8 @@ async def nav_renew(cb: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await repo.set_fsm_state(pool, cb.from_user.id, "screen:renew")
     durations = await repo.get_active_durations(pool)
-    # Цена продления — текущая (этап 43), не зафиксированная когда-то ставка.
-    monthly = await tariffs.renewal_rate(pool)
-    if monthly <= 0:
-        monthly = sub["fixed_price"]  # страховка: цена продления не задана
+    # Цена продления: текущая (этап 43) либо закреплённая промо-цена (этап 44).
+    monthly = await tariffs.renewal_monthly_for(pool, sub)
     await _edit(cb, texts.renew_choose(fmt_price(monthly)), _renew_kb(durations, monthly))
     logger.info(
         f"🤖 Бот → @{cb.from_user.username or '—'}: продление, ставка "

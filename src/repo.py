@@ -648,12 +648,22 @@ async def activate_payment(
                 # активная подписка истекла до подтверждения — оформим новую от now
 
             source = "promo" if pay["promo_id"] is not None else "payment"
+            # Фиксация промо-цены (этап 44): продление пойдёт по этой цене, а не по
+            # общей цене продления, только если промокод фиксирует цену (fixes_price).
+            # Процентный промокод даёт source='promo', но цену не фиксирует.
+            price_locked = False
+            if pay["promo_id"] is not None:
+                pr = await conn.fetchrow(
+                    "SELECT fixes_price FROM promo_codes WHERE id = $1", pay["promo_id"]
+                )
+                price_locked = bool(pr and pr["fixes_price"])
             sub = await conn.fetchrow(
                 """
                 INSERT INTO subscriptions(
-                    tg_id, tier_id, fixed_price, months, unit, end_date, source, status
+                    tg_id, tier_id, fixed_price, months, unit, end_date, source, status,
+                    price_locked
                 )
-                VALUES($1, $2, $3, $4, $5, $6, $7, 'active')
+                VALUES($1, $2, $3, $4, $5, $6, $7, 'active', $8)
                 RETURNING id
                 """,
                 pay["tg_id"],
@@ -663,6 +673,7 @@ async def activate_payment(
                 unit,
                 add_period(now, months, unit),
                 source,
+                price_locked,
             )
             await conn.execute(
                 "UPDATE payments SET status = 'succeeded', subscription_id = $2, "
@@ -1538,7 +1549,7 @@ async def get_subscriptions_for_reminders(pool: asyncpg.Pool) -> list[asyncpg.Re
     """
     return await pool.fetch(
         """
-        SELECT s.id, s.tg_id, s.end_date, s.fixed_price, s.unit,
+        SELECT s.id, s.tg_id, s.end_date, s.fixed_price, s.unit, s.price_locked,
                u.username, u.first_name,
                COALESCE(
                    array_agg(r.kind) FILTER (WHERE r.kind IS NOT NULL),

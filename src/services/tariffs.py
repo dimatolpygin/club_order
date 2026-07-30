@@ -56,6 +56,22 @@ async def renewal_rate(pool: asyncpg.Pool) -> Decimal:
     return (await app_settings.subscription_prices(pool))["renewal"]
 
 
+async def renewal_monthly_for(pool: asyncpg.Pool, sub) -> Decimal:
+    """Месячная ставка продления для конкретной подписки (этап 44).
+
+    Приоритет промокода: если за подпиской закреплена промо-цена
+    (fixes_price-промокод → `price_locked=true`), продление считается по ней —
+    скидка продления НЕ суммируется. Иначе — текущая цена продления; если она не
+    задана (≤0), падаем на прежнюю ставку подписки, чтобы не выставить 0 ₽.
+    """
+    if sub["price_locked"]:
+        return sub["fixed_price"]
+    monthly = await renewal_rate(pool)
+    if monthly <= 0:
+        monthly = sub["fixed_price"]
+    return monthly
+
+
 async def period_price(
     pool: asyncpg.Pool, redis: Redis, tier: dict, value: int, unit: str = "month"
 ) -> Decimal:

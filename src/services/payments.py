@@ -157,9 +157,8 @@ async def start_renewal(
 
     months: int = duration["months"]
     unit: str = duration["unit"]
-    monthly: Decimal = await tariffs.renewal_rate(pool)
-    if monthly <= 0:
-        monthly = sub["fixed_price"]
+    # Цена продления: приоритет фикс-промо-цены над скидкой продления (этап 44).
+    monthly: Decimal = await tariffs.renewal_monthly_for(pool, sub)
     amount = monthly * months
     user = await repo.get_user(pool, tg_id)
     description = f"Продление подписки в клуб «11:11» — {texts.period_phrase(months, unit)}"
