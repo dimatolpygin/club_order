@@ -16,9 +16,23 @@ HTML-разметка в тексте.{% if not s3_enabled %} <b>Фото нед
 <form method="post" action="/broadcasts/create" enctype="multipart/form-data" class="card">
   <div>
     <label class="price-label">Кому</label>
-    <select name="audience" class="input w-full">
+    <select name="audience" id="audience-select" class="input w-full"
+            onchange="document.getElementById('event-row').style.display =
+                      this.value === '{{ audience_event }}' ? '' : 'none';">
       {% for a, label in audiences %}<option value="{{ a }}">{{ label }}</option>{% endfor %}
     </select>
+  </div>
+  <div id="event-row" style="display:none">
+    <label class="price-label">Событие</label>
+    {% if events %}
+    <select name="event_id" class="input w-full">
+      {% for e in events %}<option value="{{ e.id }}">{{ e.label }}</option>{% endfor %}
+    </select>
+    <p class="muted">Сообщение получат только владельцы оплаченных билетов на выбранное
+      событие (возвращённые билеты не в счёт).</p>
+    {% else %}
+    <p class="muted">Нет событий с участниками или предстоящих событий.</p>
+    {% endif %}
   </div>
   <div>
     <label class="price-label">Текст (HTML)</label>

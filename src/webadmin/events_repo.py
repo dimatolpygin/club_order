@@ -18,6 +18,31 @@ async def list_events(pool: asyncpg.Pool) -> list[asyncpg.Record]:
     )
 
 
+async def list_events_for_broadcast(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    """События для выбора аудитории рассылки (этап 48): предстоящие (можно
+    подготовить заранее) + любые прошедшие, у которых есть оплаченные билеты.
+    Свежие сверху. paid_count — сколько получателей у этой аудитории сейчас.
+    """
+    return await pool.fetch(
+        """
+        SELECT e.id, e.kind, e.title, e.starts_at,
+               (SELECT count(*) FROM tickets t
+                WHERE t.event_id = e.id AND t.status = 'paid') AS paid_count
+        FROM events e
+        WHERE e.starts_at >= now() - interval '1 day'
+           OR EXISTS (SELECT 1 FROM tickets t
+                      WHERE t.event_id = e.id AND t.status = 'paid')
+        ORDER BY e.starts_at DESC
+        """
+    )
+
+
+async def events_title_map(pool: asyncpg.Pool) -> dict[int, str]:
+    """id → заголовок для всех событий (подписи в списке прошлых рассылок)."""
+    rows = await pool.fetch("SELECT id, title FROM events")
+    return {r["id"]: r["title"] for r in rows}
+
+
 def _events_filters(
     base_clause: str, search: str | None, kind: str | None, status: str | None
 ) -> tuple[str, list]:

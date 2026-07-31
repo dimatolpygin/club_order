@@ -68,14 +68,34 @@ AUDIENCE_ALL = "all"
 AUDIENCE_ACTIVE = "active"
 AUDIENCE_FORMER = "former"
 AUDIENCE_NEVER = "never"
+# Адресная аудитория «участники события» кодируется как "event:<id>" (этап 48).
+AUDIENCE_EVENT_PREFIX = "event:"
 
 
 async def get_audience_ids(pool: asyncpg.Pool, audience: str) -> list[int]:
     """tg_id для рассылки по сегменту (всегда без заблокированных).
 
     active — есть активная подписка; former — подписка была, но активной нет;
-    never — нет ни одной подписки; всё прочее — все пользователи.
+    never — нет ни одной подписки; "event:<id>" — владельцы оплаченных билетов
+    на конкретное событие (возвращённые не в счёт); всё прочее — все пользователи.
     """
+    if audience.startswith(AUDIENCE_EVENT_PREFIX):
+        raw = audience[len(AUDIENCE_EVENT_PREFIX):]
+        if not raw.isdigit():
+            return []
+        # Только оплаченные билеты (status='paid'); refunded — исключены. DISTINCT:
+        # у одного пользователя может быть несколько билетов на событие — шлём один раз.
+        rows = await pool.fetch(
+            """
+            SELECT DISTINCT t.tg_id FROM tickets t
+            JOIN users u ON u.tg_id = t.tg_id
+            WHERE t.event_id = $1 AND t.status = 'paid'
+              AND u.is_blocked = false
+            ORDER BY t.tg_id
+            """,
+            int(raw),
+        )
+        return [r["tg_id"] for r in rows]
     if audience == AUDIENCE_ACTIVE:
         sql = """
             SELECT DISTINCT u.tg_id FROM users u
