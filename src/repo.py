@@ -34,6 +34,33 @@ async def get_user(pool: asyncpg.Pool, tg_id: int) -> asyncpg.Record | None:
     return await pool.fetchrow("SELECT * FROM users WHERE tg_id = $1", tg_id)
 
 
+async def has_pd_consent(pool: asyncpg.Pool, tg_id: int, version: int) -> bool:
+    """Дал ли пользователь согласие на обработку ПД нужной версии (этап 49).
+
+    True, если есть дата согласия И сохранённая версия не ниже требуемой. Меньшая
+    версия (текст «Политики» с тех пор существенно изменили) → согласие спрашиваем
+    заново. Нет записи о пользователе → согласия нет.
+    """
+    row = await pool.fetchrow(
+        "SELECT pd_consent_at, pd_consent_version FROM users WHERE tg_id = $1", tg_id
+    )
+    if row is None or row["pd_consent_at"] is None:
+        return False
+    return (row["pd_consent_version"] or 0) >= version
+
+
+async def set_pd_consent(pool: asyncpg.Pool, tg_id: int, version: int) -> None:
+    """Фиксирует факт согласия на обработку ПД: дата = now(), версия = version."""
+    await pool.execute(
+        """
+        UPDATE users
+           SET pd_consent_at = now(), pd_consent_version = $2, updated_at = now()
+         WHERE tg_id = $1
+        """,
+        tg_id, version,
+    )
+
+
 async def search_users(
     pool: asyncpg.Pool, query: str, limit: int = 25
 ) -> list[asyncpg.Record]:
