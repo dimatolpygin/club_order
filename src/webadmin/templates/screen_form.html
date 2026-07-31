@@ -64,6 +64,45 @@
     </div>
   {% endif %}
 
+  {% if screen.docs_enabled %}
+  <h3 class="section-title">Документы экрана</h3>
+  {% if not s3_enabled %}
+    <p class="muted">Хранилище S3 не настроено — загрузка документов недоступна.</p>
+  {% else %}
+    <p class="muted">
+      Приложите один или несколько файлов (оферта, политика обработки ПД и т.п.) —
+      бот пришлёт их пользователю отдельными сообщениями перед текстом экрана.
+      PDF, DOC/DOCX, RTF, TXT.
+    </p>
+    {% if screen.documents %}
+      <div class="table-wrap" style="margin-bottom:10px;">
+        <table class="table">
+          <thead>
+            <tr><th>Файл</th><th>Открыть</th><th>Убрать</th></tr>
+          </thead>
+          <tbody>
+          {% for doc in screen.documents %}
+            <tr>
+              <td>{{ doc.name }}</td>
+              <td class="nowrap"><a href="{{ doc.url }}" target="_blank" rel="noopener">открыть</a></td>
+              <td>
+                <label class="switch">
+                  <input type="checkbox" name="remove_doc" value="{{ doc.url }}"><span>убрать</span>
+                </label>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Документы пока не приложены.</p>
+    {% endif %}
+    <input type="file" name="documents" multiple
+           accept=".pdf,.doc,.docx,.rtf,.txt,application/pdf">
+  {% endif %}
+  {% endif %}
+
   {% if buttons %}
   <h3 class="section-title">Кнопки этого экрана</h3>
   <p class="muted">Подпись и видимость кнопок. Действует и на приветствие, и на главное меню

@@ -81,9 +81,10 @@ SCREEN_DEFS: dict[str, dict] = {
         "title": "Согласие на обработку ПД (152-ФЗ)",
         "default": texts.PD_CONSENT,
         "menu": None,
+        "docs": True,
         "hint": "Текст «Политики» + согласие при первом входе. Сюда вставляется финальный "
-                "текст заказчика. Без картинки (текст может быть длинным); кнопка «Согласен» "
-                "добавляется ботом.",
+                "текст заказчика. Можно приложить документы (оферта, политика и т.п.) — бот "
+                "пришлёт их файлами перед текстом. Кнопка «Согласен» добавляется ботом.",
     },
     "support_no_link": {
         "title": "Поддержка — ссылка не задана",
@@ -97,6 +98,11 @@ SCREEN_DEFS: dict[str, dict] = {
 def default_text(key: str) -> str:
     """Дефолтный текст экрана из реестра (источник — texts.py)."""
     return SCREEN_DEFS[key]["default"]
+
+
+def supports_docs(key: str) -> bool:
+    """Можно ли прикладывать документы к экрану (оферта/политика и т.п.)."""
+    return bool(SCREEN_DEFS.get(key, {}).get("docs"))
 
 
 async def text(pool: asyncpg.Pool, key: str) -> str:
@@ -118,6 +124,7 @@ async def resolve(pool: asyncpg.Pool, key: str) -> dict:
     return {
         "text": ov.get("body") or SCREEN_DEFS[key]["default"],
         "photo_url": ov.get("photo_url"),
+        "documents": ov.get("documents") or [],
     }
 
 
@@ -136,6 +143,8 @@ async def screen_list(pool: asyncpg.Pool) -> list[dict]:
             "default_body": meta["default"],
             "custom": bool(ov.get("body")),
             "photo_url": ov.get("photo_url"),
+            "docs_enabled": bool(meta.get("docs")),
+            "documents": ov.get("documents") or [],
         })
     return result
 

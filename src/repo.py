@@ -1817,8 +1817,15 @@ async def get_screen_overrides(pool: asyncpg.Pool) -> dict[str, dict]:
     Возвращаем ВСЕ строки (фото может быть задано при дефолтном тексте, тогда body=NULL),
     резолв «что показать» — на стороне services.screens.
     """
-    rows = await pool.fetch("SELECT key, body, photo_url FROM screen_texts")
-    return {r["key"]: {"body": r["body"], "photo_url": r["photo_url"]} for r in rows}
+    rows = await pool.fetch("SELECT key, body, photo_url, documents FROM screen_texts")
+    return {
+        r["key"]: {
+            "body": r["body"],
+            "photo_url": r["photo_url"],
+            "documents": json.loads(r["documents"]) if r["documents"] else [],
+        }
+        for r in rows
+    }
 
 
 async def upsert_screen_text(pool: asyncpg.Pool, key: str, body: str | None) -> None:
@@ -1852,6 +1859,26 @@ async def upsert_screen_photo(pool: asyncpg.Pool, key: str, photo_url: str | Non
         """,
         key,
         photo_url,
+    )
+
+
+async def upsert_screen_documents(
+    pool: asyncpg.Pool, key: str, documents: list[dict]
+) -> None:
+    """Сохраняет список документов экрана [{"url","name"}, …] (пустой список → без файлов).
+
+    Текст и картинку не трогаем — правки независимы. Документы бот присылает файлами
+    перед текстом экрана (оферта/политика согласия на обработку ПД).
+    """
+    await pool.execute(
+        """
+        INSERT INTO screen_texts(key, documents, updated_at)
+        VALUES($1, $2::jsonb, now())
+        ON CONFLICT (key) DO UPDATE
+            SET documents = EXCLUDED.documents, updated_at = now()
+        """,
+        key,
+        json.dumps(documents or []),
     )
 
 

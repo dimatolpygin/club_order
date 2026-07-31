@@ -121,6 +121,37 @@ async def screen_save(request: Request, key: str):
     if new_photo != current_photo:
         await repo.upsert_screen_photo(pool, key, new_photo)
 
+    # Документы экрана (оферта/политика и т.п.) — только для экранов с docs_enabled.
+    # Текущий список = существующие минус отмеченные на удаление плюс новые загруженные.
+    if screen.get("docs_enabled"):
+        remove_urls = set(form.getlist("remove_doc"))
+        docs = [d for d in (screen.get("documents") or []) if d.get("url") not in remove_urls]
+        new_docs = [
+            f for f in form.getlist("documents")
+            if f is not None and getattr(f, "filename", "")
+        ]
+        if new_docs and not settings.s3_enabled:
+            return await _render_form(
+                request, key,
+                error="Документы недоступны: хранилище S3 не настроено.",
+            )
+        for f in new_docs:
+            data = await f.read()
+            if not data:
+                continue
+            name = f.filename
+            ext = name.rsplit(".", 1)[-1] if "." in name else "bin"
+            try:
+                url = await storage.upload_document(data, ext)
+            except Exception as e:  # noqa: BLE001 — не валим сохранение из-за одного файла
+                logger.error("Экраны (веб): не удалось загрузить документ в S3: {}", e)
+                return await _render_form(
+                    request, key,
+                    error="Не удалось загрузить документ в хранилище. Попробуйте ещё раз.",
+                )
+            docs.append({"url": url, "name": name})
+        await repo.upsert_screen_documents(pool, key, docs)
+
     # Кнопки экрана (только для меню-экранов) — переопределения подписи/видимости.
     if screen["menu"]:
         for btn_key in menu.layout_keys(screen["menu"]):

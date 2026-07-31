@@ -4,7 +4,7 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, URLInputFile
 import asyncpg
 
 from .. import keyboards as kb
@@ -25,14 +25,24 @@ async def _needs_pd_consent(pool: asyncpg.Pool, tg_id: int) -> bool:
 
 
 async def _show_consent(message: Message, pool: asyncpg.Pool, tg_id: int, username: str | None) -> None:
-    """Показывает экран согласия на обработку ПД (текст «Политики» + «Согласен»).
+    """Показывает экран согласия на обработку ПД (документы + текст «Политики» + «Согласен»).
 
-    Текст-только (без картинки): «Политика» может быть длинной, лимит подписи под
-    фото (1024) тут неуместен. Текст берётся из реестра экранов (правится в вебе).
+    Сначала бот присылает прикреплённые в админке документы (оферта, политика и т.п.)
+    отдельными файлами, затем текст согласия с кнопкой «Согласен». Текст-только (без
+    картинки): «Политика» может быть длинной, лимит подписи под фото (1024) тут неуместен.
+    Текст и документы берутся из реестра экранов (правятся в веб-админке).
     """
     await repo.set_fsm_state(pool, tg_id, "screen:pd_consent")
-    text = await screens.text(pool, "pd_consent")
-    await message.answer(text, reply_markup=kb.pd_consent_kb())
+    view = await screens.resolve(pool, "pd_consent")
+    for doc in view.get("documents") or []:
+        url, name = doc.get("url"), doc.get("name")
+        if not url:
+            continue
+        try:
+            await message.answer_document(URLInputFile(url, filename=name or None))
+        except Exception as e:  # noqa: BLE001 — один битый файл не должен блокировать согласие
+            logger.error(f"Согласие ПД: не удалось отправить документ {name or url}: {e}")
+    await message.answer(view["text"], reply_markup=kb.pd_consent_kb())
     logger.info(f"🤖 Бот → @{username or '—'}: экран согласия на обработку ПД (152-ФЗ)")
 
 

@@ -51,3 +51,31 @@ async def upload_photo(data: bytes, ext: str = "jpg", *, prefix: str = "broadcas
     url = f"{base}/{settings.s3_bucket}/{key}"
     logger.info(f"🖼 Фото загружено в S3: {url}")
     return url
+
+
+# MIME-типы под ходовые документы (оферта/политика). Прочее — октет-стрим.
+_DOC_CONTENT_TYPES = {
+    "pdf": "application/pdf",
+    "doc": "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "rtf": "application/rtf",
+    "txt": "text/plain; charset=utf-8",
+    "odt": "application/vnd.oasis.opendocument.text",
+}
+
+
+async def upload_document(data: bytes, ext: str, *, prefix: str = "screens_docs") -> str:
+    """Заливает документ (PDF/DOCX/…) в S3 и возвращает публичный URL.
+
+    Имя файла для показа хранится отдельно (в БД) — ключ в бакете обезличен (uuid),
+    поэтому кириллица/пробелы в исходном имени не ломают URL. Бросает исключение при
+    ошибке загрузки (обрабатывает вызывающий код).
+    """
+    ext = (ext or "").lower().lstrip(".") or "bin"
+    key = f"{prefix}/{uuid4().hex}.{ext}"
+    content_type = _DOC_CONTENT_TYPES.get(ext, "application/octet-stream")
+    await asyncio.to_thread(_put_sync, key, data, content_type)
+    base = (settings.s3_public_base_url or settings.s3_endpoint).rstrip("/")
+    url = f"{base}/{settings.s3_bucket}/{key}"
+    logger.info(f"📎 Документ загружен в S3: {url}")
+    return url
