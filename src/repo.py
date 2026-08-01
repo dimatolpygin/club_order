@@ -664,6 +664,120 @@ async def update_service_product(
     )
 
 
+def _service_sales_filters(
+    category: str, search: str | None, product_code: str | None,
+    date_from=None, date_to=None,
+) -> tuple[str, list]:
+    """WHERE-условие и параметры для журнала продаж услуги (этап 51).
+
+    Успешные оплаты услуги указанной категории: `p.kind='service'`,
+    `p.status='succeeded'`, `sp.category=<category>`. Поиск — по покупателю
+    (имя / @username / Telegram ID / `#N` = номер платежа). product_code — конкретный
+    формат/пакет (`sp.code`). date_from/date_to — диапазон ДАТЫ ПОКУПКИ (включительно).
+    Общий для списка, счётчика, итогов и CSV — SQL между йогой и консультациями не дублируется.
+    """
+    params: list = [category]
+    clauses = ["p.kind = 'service'", "p.status = 'succeeded'", "sp.category = $1"]
+    if product_code:
+        params.append(product_code)
+        clauses.append(f"sp.code = ${len(params)}")
+    if date_from is not None:
+        params.append(date_from)
+        clauses.append(f"p.created_at::date >= ${len(params)}")
+    if date_to is not None:
+        params.append(date_to)
+        clauses.append(f"p.created_at::date <= ${len(params)}")
+    s = (search or "").strip()
+    if s:
+        if s.startswith("#") and s[1:].strip().isdigit():
+            params.append(int(s[1:].strip()))
+            clauses.append(f"p.id = ${len(params)}")
+        else:
+            params.append(f"%{s}%")
+            i = len(params)
+            sub = (f"u.username ILIKE ${i} OR u.first_name ILIKE ${i} "
+                   f"OR CAST(p.tg_id AS TEXT) LIKE ${i}")
+            if s.isdigit():
+                params.append(int(s))
+                sub += f" OR p.id = ${len(params)}"
+            clauses.append(f"({sub})")
+    return " AND ".join(clauses), params
+
+
+# FROM-часть журнала продаж услуг — общая для списка/счётчика/итогов.
+_SERVICE_SALES_FROM = (
+    "FROM payments p "
+    "JOIN service_products sp ON sp.id = p.service_product_id "
+    "LEFT JOIN users u ON u.tg_id = p.tg_id"
+)
+
+
+async def list_service_sales(
+    pool: asyncpg.Pool, category: str, *,
+    search: str | None = None, product_code: str | None = None,
+    date_from=None, date_to=None, limit: int | None = None, offset: int = 0,
+) -> list[asyncpg.Record]:
+    """Журнал успешных продаж услуги категории для веб-админки (этап 51).
+
+    Дата покупки · покупатель · формат/пакет · количество · сумма. Фильтры: поиск по
+    покупателю, формат/пакет, диапазон даты покупки. Пагинация: limit/offset.
+    Данные — из уже совершённых платежей, дозапись не нужна (лог виден и по прошлым продажам).
+    """
+    where, params = _service_sales_filters(category, search, product_code, date_from, date_to)
+    tail = ""
+    if limit is not None:
+        params.append(limit)
+        tail += f" LIMIT ${len(params)}"
+        params.append(offset)
+        tail += f" OFFSET ${len(params)}"
+    return await pool.fetch(
+        f"""
+        SELECT p.id, p.tg_id, p.created_at, COALESCE(p.quantity, 1) AS quantity,
+               p.amount, sp.title, sp.code, u.username, u.first_name
+        {_SERVICE_SALES_FROM}
+        WHERE {where}
+        ORDER BY p.created_at DESC{tail}
+        """,
+        *params,
+    )
+
+
+async def count_service_sales(
+    pool: asyncpg.Pool, category: str, *,
+    search: str | None = None, product_code: str | None = None,
+    date_from=None, date_to=None,
+) -> int:
+    """Число продаж услуги под текущие фильтры (для пагинации, этап 51)."""
+    where, params = _service_sales_filters(category, search, product_code, date_from, date_to)
+    return await pool.fetchval(
+        f"SELECT COUNT(*) {_SERVICE_SALES_FROM} WHERE {where}", *params
+    )
+
+
+async def service_sales_totals(
+    pool: asyncpg.Pool, category: str, *,
+    search: str | None = None, product_code: str | None = None,
+    date_from=None, date_to=None,
+) -> dict:
+    """Итоги по текущему фильтру: количество, сумма, число уникальных покупателей (этап 51)."""
+    where, params = _service_sales_filters(category, search, product_code, date_from, date_to)
+    row = await pool.fetchrow(
+        f"""
+        SELECT COALESCE(SUM(COALESCE(p.quantity, 1)), 0) AS quantity,
+               COALESCE(SUM(p.amount), 0) AS amount,
+               COUNT(DISTINCT p.tg_id) AS buyers
+        {_SERVICE_SALES_FROM}
+        WHERE {where}
+        """,
+        *params,
+    )
+    return {
+        "quantity": int(row["quantity"]),
+        "amount": row["amount"],
+        "buyers": int(row["buyers"]),
+    }
+
+
 async def activate_service_payment(pool: asyncpg.Pool, yk_id: str) -> bool:
     """Помечает платёж услуги succeeded ровно один раз. True — если это первая пометка.
 

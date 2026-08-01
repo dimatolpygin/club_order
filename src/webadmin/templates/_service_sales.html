@@ -1,0 +1,71 @@
+{# Журнал продаж услуги (этап 51) — общий блок для «Йоги» и «Консультаций».
+   Контекст: category, item_label, item_word, products, sales, totals,
+   search, product_code, date_from, date_to, page, pages, total, per_page. #}
+<h3 class="section-title">Продажи</h3>
+<p class="muted">Успешные оплаты этой услуги (по данным платежей — включая уже совершённые).
+Поиск по покупателю и фильтры по периоду и {{ item_label|lower }}у. Итоги считаются по
+текущему фильтру. Учёт занятий/пакетов у покупателя ведёт менеджер в личке — здесь только
+факт продажи.</p>
+
+<form class="filter-bar" method="get" action="/{{ category }}">
+  <input class="input" type="search" name="q" value="{{ search }}"
+         placeholder="Имя, @username, ID или #номер" style="min-width:220px">
+  <select class="input" name="product" onchange="this.form.submit()">
+    <option value="">Все ({{ item_label|lower }})</option>
+    {% for p in products %}
+      <option value="{{ p.code }}"{% if product_code == p.code %} selected{% endif %}>{{ p.title }}</option>
+    {% endfor %}
+  </select>
+  <div class="date-range">
+    <div class="date-row">
+      <label class="field-label" for="from">Куплено с:</label>
+      <input class="input input-date" type="date" id="from" name="from" value="{{ date_from }}">
+    </div>
+    <div class="date-row">
+      <label class="field-label" for="to">по:</label>
+      <input class="input input-date" type="date" id="to" name="to" value="{{ date_to }}">
+    </div>
+  </div>
+  <button type="submit" class="btn btn-light btn-sm">Найти</button>
+  {% if search or product_code or date_from or date_to %}
+    <a class="btn btn-light btn-sm" href="/{{ category }}">Сбросить</a>
+  {% endif %}
+  <a class="btn btn-sm btn-light"
+     href="/{{ category }}/sales.csv?q={{ search|urlencode }}&product={{ product_code|urlencode }}&from={{ date_from }}&to={{ date_to }}">Выгрузить CSV</a>
+</form>
+
+<p class="muted">Продано <b>{{ totals.quantity }}</b> {{ item_word }} на сумму
+<b>{{ totals.amount }}</b> ₽ · покупателей: <b>{{ totals.buyers }}</b>.
+{% if total > per_page %} Страница {{ page }} из {{ pages }}.{% endif %}</p>
+
+{% if sales %}
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr><th>Дата</th><th>Покупатель</th><th>{{ item_label }}</th><th>Кол-во</th><th>Сумма</th></tr>
+    </thead>
+    <tbody>
+    {% for s in sales %}
+      <tr>
+        <td class="nowrap">{{ s.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td>{{ s.name }}{% if s.username %} <span class="muted">@{{ s.username }}</span>{% endif %}
+            <span class="muted">id {{ s.tg_id }}</span></td>
+        <td>{{ s.title }}</td>
+        <td>{{ s.quantity }}</td>
+        <td class="nowrap">{{ s.amount }} ₽</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if pages > 1 %}
+  {% set qs = 'q=' ~ (search|urlencode) ~ '&product=' ~ (product_code|urlencode) ~ '&from=' ~ date_from ~ '&to=' ~ date_to %}
+  <div class="pager" style="display:flex;gap:12px;align-items:center;margin:12px 0">
+    {% if page > 1 %}<a class="btn btn-sm btn-light" href="/{{ category }}?{{ qs }}&page={{ page - 1 }}">← Назад</a>{% endif %}
+    <span class="muted">Страница {{ page }} из {{ pages }}</span>
+    {% if page < pages %}<a class="btn btn-sm btn-light" href="/{{ category }}?{{ qs }}&page={{ page + 1 }}">Вперёд →</a>{% endif %}
+  </div>
+{% endif %}
+{% else %}
+<div class="empty">{% if search or product_code or date_from or date_to %}Под текущие фильтры продаж не найдено.{% else %}Продаж этой услуги пока нет.{% endif %}</div>
+{% endif %}
